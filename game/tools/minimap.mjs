@@ -53,7 +53,7 @@ const isDrawn = (s, x, y) => {
 
 function findBox(s) {
   let best = { y: -1, x0: -1, len: 0 };
-  for (let y = 20; y < 48; y++) {
+  for (let y = 2; y < 60; y++) {
     let run = 0, start = -1;
     for (let x = 200; x < W; x++) {
       if (isDrawn(s, x, y)) {
@@ -105,10 +105,25 @@ console.log("\n[1] 小地图的位置和尺寸");
   if (box) {
     console.log(`  外框 x ${box.x0}..${box.x1}, y ${box.top}..${box.bottom}（${box.w}x${box.h}）`);
     ok(box.x1 > W - 20, "贴在右边", `右边缘 x=${box.x1}`);
-    ok(box.top >= 20, "上边缘避开顶部的时间/金币文字", `y=${box.top}`);
+    ok(box.top <= 8, "小地图在最上面（贴顶）", `上边缘 y=${box.top}`);
     ok(box.bottom < H - 10, "没有超出屏幕", `底边 y=${box.bottom}`);
     ok(box.w > 60, "宽度够看", `${box.w} px`);
     ok(box.x0 > 80, "没有压到左上角的血条", `左边缘 x=${box.x0}`);
+
+    // 文字必须在盒子下面（这是这次调整的重点）
+    let textBelow = false;
+    for (let y = box.bottom + 1; y < box.bottom + 14; y++)
+      for (let x = box.x0; x <= box.x1; x++) {
+        const { r, g, b } = pix(s, x, y);
+        if (Math.max(r, g, b) > 60) { textBelow = true; break; }
+      }
+    ok(textBelow, "文字排在小地图下面", `小地图底边 y=${box.bottom}`);
+
+    // 小地图上方不该有东西（它就该是最顶上的元素）
+    let above = 0;
+    for (let y = 0; y < box.top; y++)
+      for (let x = box.x0; x <= box.x1; x++) if (isDrawn(s, x, y)) above++;
+    ok(above === 0, "小地图上方没有其他内容", `${above} px`);
   }
 }
 

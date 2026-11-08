@@ -13,7 +13,7 @@
 const MINI_W = 88;
 const MINI_H = 14;
 const MINI_PAD = 3;
-const MINI_TOP = 22;
+const MINI_TOP = 4;      // 贴顶：小地图在最上面，文字排在它下面
 
 export function drawMinimap(s, game, C) {
   const level = game.level;

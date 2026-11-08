@@ -93,18 +93,29 @@ for (const mode of ["level", "endless"]) {
   };
   const bright = (p) => Math.max(p.r, p.g, p.b) > 60;
 
-  // 顶边框：y=22 应该有一条长横线
-  let topRun = 0, best = 0;
-  for (let x = 200; x < w; x++) {
-    if (bright(at(x, 22))) { topRun++; best = Math.max(best, topRun); } else topRun = 0;
+  // 顶边框：小地图现在贴顶，在上部（y 2..12）找最长横线
+  let bestRun = 0, bestY = -1;
+  for (let y = 2; y < 12; y++) {
+    let run = 0;
+    for (let x = 200; x < w; x++) {
+      if (bright(at(x, y))) { run++; if (run > bestRun) { bestRun = run; bestY = y; } }
+      else run = 0;
+    }
   }
-  ok(best > 40, `${mode}: 小地图顶边框在线上`, `${best} px`);
+  ok(bestRun > 40, `${mode}: 小地图顶边框在画面上部`, `${bestRun} px @ y=${bestY}`);
+  ok(bestY <= 8, `${mode}: 小地图贴顶（文字在它下面）`, `y=${bestY}`);
 
   // 内部有地形
   let inside = 0;
-  for (let y = 24; y < 42; y++)
+  for (let y = bestY + 2; y < bestY + 20 && y < h; y++)
     for (let x = 224; x < 314; x++) if (bright(at(x, y))) inside++;
   ok(inside > 80, `${mode}: 小地图内部有地形`, `${inside} px`);
+
+  // 小地图下方应该有文字
+  let textBelow = 0;
+  for (let y = bestY + 20; y < Math.min(h, bestY + 34); y++)
+    for (let x = 240; x < 316; x++) if (bright(at(x, y))) textBelow++;
+  ok(textBelow > 20, `${mode}: 文字排在小地图下面`, `${textBelow} px`);
 
   writeFileSync(join(GAME, `preview-live-minimap-${mode}.png`), Buffer.from(
     (await (async () => {

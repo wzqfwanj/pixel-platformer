@@ -50,14 +50,20 @@ export function drawHud(s, game) {
   s.outline(bx - 1, by - 1, bw + 2, bh + 2, C.barEdge);
   drawText(s, `${Math.ceil(p.hp)}`, bx + bw + 3, by, C.text, { shadow: sh });
 
+  // 右上角：小地图在最上面，文字排在它下沿之下。
+  // 结算/死亡画面不画小地图，这时文字回到顶部。
+  const mapBox = game.won ? null : drawMinimap(s, game, C);
+  const textRight = mapBox ? mapBox.x + mapBox.w : 316;
+  const textTop = mapBox ? mapBox.y + mapBox.h + 3 : 6;
+
   if (game.mode === "endless") {
     // 无尽模式右上：生存时间（大字）+ 击杀数 + 下一波倒计时
     const t = game.surviveTime ?? 0;
     const mm = Math.floor(t / 60);
     const ss = Math.floor(t % 60);
     const timeStr = `${mm}:${String(ss).padStart(2, "0")}`;
-    drawText(s, timeStr, 316, 4, C.accent, { font: "big", align: "right", shadow: sh });
-    drawText(s, `${game.enemiesKilled} KILL`, 316, 14, C.dim, { align: "right", shadow: sh });
+    drawText(s, timeStr, textRight, textTop, C.accent, { font: "big", align: "right", shadow: sh });
+    drawText(s, `${game.enemiesKilled} KILL`, textRight, textTop + 10, C.dim, { align: "right", shadow: sh });
 
     // 左下：波次 + 场上敌人数
     const alive = game.enemies.filter((e) => !e.dead).length;
@@ -73,9 +79,9 @@ export function drawHud(s, game) {
       drawText(s, game.waveText, 160, 46, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
     }
   } else {
-    // ---- 关卡模式右上：金币 / 击杀
-    drawText(s, `COIN ${game.coins}/${game.coinTotal}`, 316, 6, C.accent, { align: "right", shadow: sh });
-    drawText(s, `${game.enemiesKilled} KILL`, 316, 14, C.dim, { align: "right", shadow: sh });
+    // ---- 关卡模式右上：金币 / 击杀（同样排在小地图下面）
+    drawText(s, `COIN ${game.coins}/${game.coinTotal}`, textRight, textTop, C.accent, { align: "right", shadow: sh });
+    drawText(s, `${game.enemiesKilled} KILL`, textRight, textTop + 8, C.dim, { align: "right", shadow: sh });
   }
 
   // ---- 连击：当前连击大字，峰值小字
@@ -124,7 +130,4 @@ export function drawHud(s, game) {
     s.rect(0, 74, 320, 26, C.panel);
     drawText(s, "YOU DIED", 160, 80, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
   }
-
-  // ---- 右上角小地图（结算画面时隐藏，免得挡字）
-  if (!game.won) drawMinimap(s, game, C);
 }
