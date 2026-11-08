@@ -1,0 +1,16 @@
+角色改用参考图的 4 个姿势
+
+从 ref/character-ref.png 拆出 4 个姿势作为角色帧：
+- tools/build-ref-frames.mjs：裁切 -> 按身体轴线水平对齐 -> 按脚底垂直对齐
+  -> 面积平均降采样到 22x30 -> 三档灰度量化
+- 水平对齐刻意用"头顶 10% 处最窄段的中心"而不是外接框中心：
+  每个角色都有大片向一侧飘的披风，按外接框对齐会让披风宽的那帧被推偏，
+  动画一播就左右晃
+- entities/refFrames.js：4 帧像素数据（自动生成）
+- entities/warriorRefArt.js：绘制层，支持整数像素的倾斜/纵向拉伸/翻转
+- warrior.js：攻击按招式进度切帧 0->1->2->3，其余状态用固定帧 + 姿态变换
+- warriorArt.js（程序化绘制）保留，可随时切回
+
+已知限制：4 张静态图腿部无动作，跑动时腿不摆，只靠身体起伏和倾斜补动感。
+
+附 preview-ref-frames.png / preview-refchar-game.png 便于核对效果

@@ -3,6 +3,7 @@
 
 import { clamp, approach, aabb, easeInQuad, easeOutQuad, easeOutCubic, smoothstep, dampAngle } from "../core/util.js";
 import { drawWarrior, WARRIOR_W, WARRIOR_H, WARRIOR_CX } from "./warriorArt.js";
+import { drawRefWarrior, REF_W, REF_H, REF_AXIS_X } from "./warriorRefArt.js";
 import { WARRIOR_PALETTE } from "../fx/fxlayer.js";
 import { SpritePlate } from "../core/spriteplate.js";
 
@@ -545,18 +546,52 @@ export class Warrior {
     const camX = cam.x | 0, camY = cam.y | 0;
 
     // 脚下的影子
-    const sw = 10, shx = Math.round(this.cx) - sw / 2 - camX, shy = Math.round(this.feet) - 1 - camY;
+    const sw = 10, shx = Math.round(this.cx - sw / 2) - camX, shy = Math.round(this.feet - 1) - camY;
     for (let i = 0; i < sw; i++) s.blendPx(shx + i, shy, 0xff000000, 0.35);
     for (let i = 1; i < sw - 1; i++) s.blendPx(shx + i, shy - 1, 0xff000000, 0.18);
 
-    // 精灵画到独立小画布，再带描边贴到场景（亮背景下才看得清轮廓）
+    // ---- 用参考图转出来的 4 帧来画
     const pose = this.pose();
-    plate.render((p) => drawWarrior(p, 1, 1, this.facing, pose));
-    // 取整源和相机一致（都是 round(cx)），角色在屏幕上的位置才不会因为两次取整不同步而跳 1 像素
-    const body = BODY_OFFSET[this.facing > 0 ? 1 : 0];
-    const px = Math.round(this.cx) - body - 1 - camX;
-    const py = Math.round(this.feet) - WARRIOR_H - camY;
-    plate.blit(s, px, py, true);
+    const frame = this.pickRefFrame();
+
+    // 姿态变换（只做整数像素，保持像素干净）
+    let tilt = 0, stretch = 1, lift = 0;
+    if (this.atk) {
+      const a = this.atk, c = a.cfg;
+      const t2 = c.windup + c.active;
+      if (a.t >= c.windup && a.t < t2) {
+        // 出刀瞬间身体前倾
+        const u = (a.t - c.windup) / c.active;
+        tilt = this.facing * (0.35 + 0.65 * Math.sin(u * Math.PI));
+        stretch = 1 + 0.05 * Math.sin(u * Math.PI);
+      } else if (a.t >= t2) {
+        const u = Math.min(1, (a.t - t2) / c.recover);
+        tilt = -this.facing * 0.3 * (1 - u);
+      }
+    } else if (this.state === "dash") {
+      tilt = this.facing * 1.0;
+    } else if (this.charging) {
+      stretch = 0.96;
+    } else if (!this.onGround) {
+      stretch = this.vy < 0 ? 1.06 : 0.97;
+      lift = 1;
+    } else if (Math.abs(this.vx) > 12) {
+      // 跑动：身体轻微起伏 + 前倾（只有 4 帧图，靠姿态补动感）
+      const ph = (this.animT * 9) % 2;
+      stretch = ph < 1 ? 1.02 : 0.99;
+      tilt = this.facing * 0.35;
+    } else {
+      // 待机呼吸
+      const br = Math.sin(this.t * 3.2);
+      stretch = 1 + br * 0.012;
+    }
+    if (this.state === "hurt") tilt = -this.facing * 0.6;
+
+    // 精灵水平位置：按"身体轴线"对齐碰撞盒中心，而不是按图片左边缘
+    const px = Math.round(this.cx) - REF_AXIS_X - camX;
+    const py = Math.round(this.feet) - REF_H + 1 - camY;
+
+    drawRefWarrior(s, px, py, this.facing, frame, { tilt, stretch, lift });
 
     // 蓄力光
     if (this.charging) {
@@ -723,6 +758,29 @@ export class Warrior {
    * 对外的姿态：把目标姿态和时间做混合，得到最终这一帧要画的东西。
    * 攻击中不做平滑（要的就是"啪"一下），其他状态用指数平滑消除硬切。
    */
+  /**
+   * 选参考图的第几帧。
+   * 4 帧的含义（按参考图的差异推断）：
+   *   0 = 手臂收在身侧（待机 / 起手）
+   *   1 = 手臂开始前伸
+   *   2 = 前伸最多（出招最远的瞬间）
+   *   3 = 收回 / 受创
+   */
+  pickRefFrame() {
+    if (this.atk) {
+      const a = this.atk, c = a.cfg;
+      const t1 = c.windup, t2 = c.windup + c.active;
+      if (a.t < t1) return 0;
+      if (a.t < t1 + c.active * 0.5) return 1;
+      if (a.t < t2) return 2;
+      return 3;
+    }
+    if (this.state === "hurt" || this.state === "dead") return 3;
+    if (this.charging) return 0;
+    if (!this.onGround) return this.vy < 0 ? 1 : 3;
+    return 0;
+  }
+
   pose() {
     const target = this.computePose();
 
