@@ -75,7 +75,27 @@ export const CFG = {
     dmg: 6, reach: 21, hitH: 17, fx: "melee/spin-slash",
     shake: 1.8, kb: 44, lunge: 30, hitstop: 0.045, float: -40,
   },
-  heavy: { chargeMax: 0.75, dmg: 16, dmgPerCharge: 14, radius: 34, windup: 0.10, active: 0.12, recover: 0.34, shake: 6 },
+  // 蓄力斩（K）：唯一的长按技能。
+  // 判定是一条从身前伸出的横向长条，能同时砍到多个敌人（穿透），
+  // 蓄满时距离和伤害都涨。和之前的圆形砸地相比，更强调"向前打穿"而不是"原地清场"。
+  heavy: {
+    id: "chargeSlash",
+    chargeMax: 0.75,
+    dmg: 14,
+    dmgPerCharge: 16,     // 蓄满总伤害 = 14 + 16 = 30
+    reachBase: 30,        // 基础攻击距离
+    reachPerCharge: 22,   // 蓄满再多 22（总 52）
+    hitH: 20,             // 判定高度
+    windup: 0.10,         // 松手到出刀
+    active: 0.13,         // 判定窗口
+    recover: 0.30,        // 收招
+    lunge: 96,            // 出刀前冲速度
+    shake: 5.5,
+    hitstop: 0.08,
+    pierce: true,         // 能打穿多个敌人
+    fx: "melee/heavy-cleave",
+    fxFull: "melee/spin-slash",   // 蓄满换更夸张的刀光
+  },
 };
 
 export class Warrior {
@@ -109,8 +129,8 @@ export class Warrior {
     this.charging = false;
     this.charge = 0;
     this.chargeFx = null;
-    this.slamOnLand = false;
-    this.slam = null;     // { t, phase }
+    this.slash = null;    // 蓄力斩动作 { t, phase, k, hits }
+    this.charge = 0;
     this.safe = { x, y };
     this.safeT = 0;
   }
@@ -203,38 +223,65 @@ export class Warrior {
   releaseCharge(world) {
     if (!this.charging) return;
     this.charging = false;
-    const k = this.charge / this.cfg.heavy.chargeMax;
+    const k = Math.min(1, this.charge / this.cfg.heavy.chargeMax);
     if (this.chargeFx) { this.chargeFx.fx.stop(); this.chargeFx = null; }
-    if (this.onGround) {
-      this.slam = { t: 0, phase: "windup", k };
-      this.state = "attack";
-    } else {
-      // 空中重砸：先快速下坠，落地时炸开
-      this.slamOnLand = true;
-      this.slamK = k;
-      this.vy = Math.max(this.vy, 120);
-      this.vx *= 0.4;
-    }
+    // 松手进入蓄力斩的动作（前摇 -> 判定 -> 后摇），地面空中都能放
+    this.slash = { t: 0, phase: "windup", k, hits: new Set() };
+    this.state = "attack";
+    this.comboTimer = 0;
     this.charge = 0;
+    if (this.onGround) this.vx *= 0.3;
   }
 
-  /** 重砸落地的那一刻：范围伤害 */
-  doSlam(world, k) {
+  /**
+   * 蓄力斩的判定：一条从身前伸出的横向长条。
+   * k = 蓄力比例（0..1），蓄满时攻击距离更远、伤害更高。
+   */
+  doChargeSlash(world, k, hits) {
     const H = this.cfg.heavy;
     const dmg = H.dmg + Math.round(H.dmgPerCharge * k);
-    const cx = this.cx, cy = this.feet;
-    world.fx.spawn("impacts/ground-slam", cx, cy, { palette: WARRIOR_PALETTE, seed: Math.random() * 100 });
-    world.fx.spawn("explosions/dirt-explosion", cx, cy, { seed: Math.random() * 100 });
-    world.shake(H.shake + k * 3);
-    world.hitLag(0.06);
-    for (const e of world.enemies) {
-      if (e.dead) continue;
-      const dx = e.cx - cx, dy = e.cy - cy;
-      if (Math.abs(dx) <= H.radius && Math.abs(dy) <= 26) {
-        e.takeDamage(dmg, cx, world, k > 0.5);
-        world.onHit?.(1);
-      }
+    const reach = H.reachBase + H.reachPerCharge * k;
+    const dir = this.facing;
+
+    // 判定框：从身体边缘往前伸
+    const hb = dir > 0
+      ? { x: this.x + this.w - 2, y: this.y - 2, w: reach, h: H.hitH }
+      : { x: this.x + 2 - reach, y: this.y - 2, w: reach, h: H.hitH };
+
+    // 视觉：刀光 + 震屏 + 顿帧
+    const fxId = k >= 0.85 ? H.fxFull : H.fx;
+    world.fx.spawn(fxId, this.cx + dir * (reach * 0.45), this.cy, {
+      flip: dir < 0,
+      palette: WARRIOR_PALETTE,
+      seed: Math.random() * 100,
+    });
+    // 蓄满额外加一道冲击
+    if (k >= 0.85) {
+      world.fx.spawn("impacts/crit-hit", this.cx + dir * reach * 0.6, this.cy, {
+        flip: dir < 0, seed: Math.random() * 100,
+      });
     }
+    world.shake(H.shake + k * 4);
+    world.hitLag(H.hitstop + k * 0.03);
+
+    let hitCount = 0;
+    for (const e of world.enemies) {
+      if (e.dead || hits.has(e)) continue;
+      const box = e.box;
+      const overlap = hb.x < box.x + box.w && hb.x + hb.w > box.x &&
+                      hb.y < box.y + box.h && hb.y + hb.h > box.y;
+      if (!overlap) continue;
+      hits.add(e);
+      // 击退方向按刀的方向，蓄满击退更远
+      e.takeDamage(dmg, this.cx, world, k >= 0.85, {
+        kb: (60 + 90 * k) * dir,
+        stun: 0.22 + 0.1 * k,
+      });
+      hitCount++;
+      world.onHit?.(1, { crit: k >= 0.85 });
+      if (!H.pierce) break;
+    }
+    return hitCount;
   }
 
   update(dt, input, world) {
@@ -291,17 +338,30 @@ export class Warrior {
       return;
     }
 
-    // ---- 重砸动作中
-    if (this.slam) {
-      this.slam.t += dt;
+    // ---- 蓄力斩动作中
+    if (this.slash) {
+      this.slash.t += dt;
       const H = this.cfg.heavy;
-      if (this.slam.phase === "windup" && this.slam.t >= H.windup) {
-        this.slam.phase = "active";
-        this.doSlam(world, this.slam.k);
+      const t1 = H.windup, t2 = H.windup + H.active;
+
+      if (this.slash.phase === "windup" && this.slash.t >= t1) {
+        this.slash.phase = "active";
+        // 出刀瞬间前冲
+        this.vx = this.facing * H.lunge;
+        this.doChargeSlash(world, this.slash.k, this.slash.hits);
       }
-      if (this.slam.phase === "active" && this.slam.t >= H.windup + H.active + H.recover) this.slam = null;
-      this.vx = approach(this.vx, 0, 900 * dt);
+
+      // 出刀后速度快速衰减（保留一点前冲惯性）
+      const dragging = this.slash.t < t2 ? 1.2 : 4.0;
+      const finished = this.slash.t >= t2 + H.recover;
+      if (finished) {
+        this.slash = null;
+        this.state = this.onGround ? "idle" : "fall";
+      }
+
+      this.vx = approach(this.vx, 0, this.cfg.accel * dragging * dt);
       this.physics(dt, L);
+      this.checkHazards(world);
       return;
     }
 
@@ -454,10 +514,6 @@ export class Warrior {
 
     // 落地
     if (this.onGround) {
-      if (this.slamOnLand) {
-        this.slamOnLand = false;
-        this.doSlam(world, this.slamK ?? 0);
-      }
       this.state = Math.abs(this.vx) > 12 ? "run" : "idle";
     } else {
       this.state = this.vy < 0 ? "jump" : "fall";
@@ -583,10 +639,19 @@ export class Warrior {
         const u = Math.min(1, (a.t - t2) / Math.max(1e-4, c.recover));
         tilt = this.facing * 0.4 * (1 - u);
       }
-    } else if (this.slam) {
-      anim = this.slam.phase === "windup" ? "jump" : "attack";
-      stretch = this.slam.phase === "windup" ? 1.08 : 0.94;
-      tilt = this.slam.phase === "windup" ? -this.facing * 0.4 : this.facing * 0.6;
+    } else if (this.slash) {
+      // 蓄力斩：前摇后仰，出刀前冲压低
+      const H = this.cfg.heavy;
+      if (this.slash.t < H.windup) {
+        anim = "jump";
+        stretch = 1.06;
+        tilt = -this.facing * 0.5;
+      } else {
+        anim = "attack";
+        stretch = 0.93;
+        tilt = this.facing * 0.8;
+      }
+    } else if (this.charging) {
     } else if (this.charging) {
       // 蓄力：压低身体
       anim = "walk";
@@ -666,22 +731,33 @@ export class Warrior {
       return p;
     }
 
-    if (this.slam) {
+    // 蓄力斩：前摇后仰蓄势，出刀前压
+    if (this.slash) {
       const H = this.cfg.heavy;
-      const u = clamp(this.slam.t / Math.max(0.001, H.windup), 0, 1);
-      if (this.slam.phase === "windup") {
+      const t2 = H.windup + H.active;
+      if (this.slash.t < H.windup) {
+        const u = clamp(this.slash.t / Math.max(0.001, H.windup), 0, 1);
         p.legs = "stand";
         p.bob = -1 - easeInQuad(u) * 2;
-        p.lean = -easeInQuad(u) * 2;
+        p.lean = -easeInQuad(u) * 2.2;
         p.stretch = 1 + easeInQuad(u) * 0.06;
-        p.sword = -Math.PI / 2 - 0.3 - easeInQuad(u) * 0.25;
-        p.charge = 1;
-      } else {
+        p.sword = -Math.PI / 2 - 0.3 - easeInQuad(u) * 0.3;
+        p.charge = this.slash.k;
+      } else if (this.slash.t < t2) {
+        // 出刀：身体前压 + 拉伸
+        const u = clamp((this.slash.t - H.windup) / Math.max(0.001, H.active), 0, 1);
         p.legs = "attack";
-        p.bob = 1.5;
-        p.lean = 2.5;
-        p.stretch = 0.92;
-        p.sword = Math.PI / 2 + 0.35;
+        p.bob = 1.2 * easeOutCubic(u);
+        p.lean = 3.0 * easeOutCubic(u);
+        p.stretch = 1 + 0.08 * Math.sin(u * Math.PI);
+        p.sword = -Math.PI / 2 + Math.PI * 1.4 * easeOutCubic(u);
+        p.trail = this.trail;
+      } else {
+        const u = clamp((this.slash.t - t2) / Math.max(0.001, H.recover), 0, 1);
+        p.legs = "attack";
+        p.bob = 1.2 * (1 - easeOutQuad(u));
+        p.lean = 3.0 * (1 - easeOutQuad(u));
+        p.sword = -Math.PI / 2 + Math.PI * 1.4 * (1 - easeOutQuad(u) * 0.6);
       }
       return p;
     }

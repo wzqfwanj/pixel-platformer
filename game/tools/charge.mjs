@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // 蓄力机制 + 蓄力条测试。
 //
 // 检查什么：
@@ -218,11 +219,12 @@ console.log("\n[6] 明暗两套主题下都可见");
 }
 
 // ---------------------------------------------------------------- 7. 蓄力影响伤害
-console.log("\n[7] 蓄力越满，重砸伤害越高");
+console.log("\n[7] 蓄力斩：伤害随蓄力提升");
 {
   const test = (holdFrames) => {
     const { world, p } = makeWorld();
-    const dummy = new Enemy("dummy", p.cx + 20, p.feet);
+    // 放在正前方，确保在判定范围内
+    const dummy = new Enemy("dummy", p.cx + 18, p.feet);
     dummy.update = () => {};
     world.enemies = [dummy];
     const hp0 = dummy.hp;
@@ -232,7 +234,6 @@ console.log("\n[7] 蓄力越满，重砸伤害越高");
     for (let i = 0; i < holdFrames; i++) p.update(DT, inp, world);
     const k = p.charge / p.cfg.heavy.chargeMax;
     p.update(DT, holdInput(false, true), world);
-    // 走完重砸动作
     const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
     for (let i = 0; i < 90; i++) p.update(DT, idle, world);
     return { dmg: hp0 - dummy.hp, k };
@@ -243,6 +244,105 @@ console.log("\n[7] 蓄力越满，重砸伤害越高");
   console.log(`  轻点（k=${light.k.toFixed(2)}）造成 ${light.dmg} 伤害；蓄满（k=${full.k.toFixed(2)}）造成 ${full.dmg} 伤害`);
   ok(light.dmg > 0, "轻点也有伤害", `${light.dmg}`);
   ok(full.dmg > light.dmg, "蓄满伤害更高", `${full.dmg} vs ${light.dmg}`);
+}
+
+// ---------------------------------------------------------------- 8. 横向判定
+console.log("\n[8] 蓄力斩是横向判定（不是圆形范围）");
+{
+  const { world, p } = makeWorld();
+  p.facing = 1;
+  // 正前方 40px 处（横向）和一个在身后 10px 处的
+  const front = new Enemy("dummy", p.cx + 40, p.feet);
+  const behind = new Enemy("dummy", p.cx - 18, p.feet);
+  const above = new Enemy("dummy", p.cx, p.feet - 60);
+  for (const e of [front, behind, above]) e.update = () => {};
+  world.enemies = [front, behind, above];
+  const hp = { f: front.hp, b: behind.hp, a: above.hp };
+
+  p.startCharge(world);
+  const inp = holdInput(false);
+  for (let i = 0; i < 50; i++) p.update(DT, inp, world);
+  p.update(DT, holdInput(false, true), world);
+  const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+  for (let i = 0; i < 60; i++) p.update(DT, idle, world);
+
+  console.log(`  正前方：${hp.f} -> ${front.hp}（${hp.f - front.hp} 伤害）`);
+  console.log(`  身后：  ${hp.b} -> ${behind.hp}（${hp.b - behind.hp} 伤害）`);
+  console.log(`  高处：  ${hp.a} -> ${above.hp}（${hp.a - above.hp} 伤害）`);
+  ok(front.hp < hp.f, "正前方的敌人被打中", `${hp.f - front.hp} 伤害`);
+  ok(behind.hp === hp.b, "身后的敌人不受伤（是横向斩不是圆形）", "");
+  ok(above.hp === hp.a, "高处的敌人不受伤", "");
+}
+
+// ---------------------------------------------------------------- 9. 穿透多个敌人
+console.log("\n[9] 蓄力斩能打穿多个敌人");
+{
+  const { world, p } = makeWorld();
+  p.facing = 1;
+  // 一排三个
+  const line = [
+    new Enemy("dummy", p.cx + 20, p.feet),
+    new Enemy("dummy", p.cx + 34, p.feet),
+    new Enemy("dummy", p.cx + 46, p.feet),
+  ];
+  for (const e of line) e.update = () => {};
+  world.enemies = line;
+  const hp0 = line.map((e) => e.hp);
+
+  p.startCharge(world);
+  const inp = holdInput(false);
+  for (let i = 0; i < 50; i++) p.update(DT, inp, world);
+  p.update(DT, holdInput(false, true), world);
+  const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+  for (let i = 0; i < 60; i++) p.update(DT, idle, world);
+
+  const hit = line.filter((e, i) => e.hp < hp0[i]).length;
+  console.log(`  一排 3 个敌人，被打中 ${hit} 个`);
+  ok(hit >= 2, "一次能打中多个（穿透）", `${hit} / 3`);
+}
+
+// ---------------------------------------------------------------- 10. 蓄满打得更远
+console.log("\n[10] 蓄满时攻击距离更远");
+{
+  const reachOf = (holdFrames) => {
+    const { world, p } = makeWorld();
+    p.facing = 1;
+    // 放在较远处，只有蓄满才够得到
+    const far = new Enemy("dummy", p.cx + 48, p.feet);
+    far.update = () => {};
+    world.enemies = [far];
+    const hp0 = far.hp;
+    p.startCharge(world);
+    const inp = holdInput(false);
+    for (let i = 0; i < holdFrames; i++) p.update(DT, inp, world);
+    p.update(DT, holdInput(false, true), world);
+    const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+    for (let i = 0; i < 60; i++) p.update(DT, idle, world);
+    return hp0 - far.hp;
+  };
+
+  const dLight = reachOf(4);
+  const dFull = reachOf(50);
+  const H = new Warrior(0, 0).cfg.heavy;
+  const reachLight = H.reachBase + H.reachPerCharge * (4 * DT / H.chargeMax);
+  const reachFull = H.reachBase + H.reachPerCharge;
+  console.log(`  48px 处的敌人：轻点造成 ${dLight}，蓄满造成 ${dFull}`);
+  console.log(`  配置距离：轻点约 ${reachLight.toFixed(0)}px，蓄满 ${reachFull.toFixed(0)}px`);
+  ok(reachFull > reachLight + 10, "蓄满的攻击距离明显更长", `${reachFull.toFixed(0)} vs ${reachLight.toFixed(0)}`);
+  ok(dFull > 0, "蓄满能打到远处", `${dFull} 伤害`);
+}
+
+// ---------------------------------------------------------------- 11. 只有一个 K 技能
+console.log("\n[11] K 键只有一个技能（蓄力斩）");
+{
+  const src = readFileSync(new URL("../entities/warrior.js", import.meta.url), "utf8");
+  ok(!src.includes("doSlam"), "旧的砸地技能已移除", "");
+  ok(!src.includes("slamOnLand"), "旧的下坠砸地已移除", "");
+  ok(src.includes("doChargeSlash"), "蓄力斩实现存在", "");
+  const { p } = makeWorld();
+  const ids = p.cfg.combo.map((c) => c.id).concat([p.cfg.launcher.id, p.cfg.air.id, p.cfg.heavy.id]);
+  console.log(`  攻击招式总数：${ids.length} 个 -> ${ids.join(", ")}`);
+  ok(ids.length === 6, "共 6 个攻击招式（3 段连招 + 上挑 + 空中斩 + 蓄力斩）", `${ids.length}`);
 }
 
 console.log(fails === 0 ? "\n蓄力检查全部通过" : `\n有 ${fails} 项失败`);
