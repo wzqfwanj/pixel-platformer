@@ -27,3 +27,5 @@ __pycache__/
 
 # 本地工具状态
 .agent/
+
+game/tools/frame.txt
