@@ -102,10 +102,12 @@ export function drawHud(s, game) {
 
   // ---- 调试信息
   if (game.debug) {
+    const maxC = p.cfg.heavy.chargeMax;
     const lines = [
-      `FPS ${game.fps.toFixed(0)}  FX ${game.fx.count}  THEME ${getTheme().name}`,
-      `POS ${p.cx.toFixed(0)},${p.feet.toFixed(0)}  VX ${p.vx.toFixed(0)} VY ${p.vy.toFixed(0)}`,
-      `STATE ${p.state}  GROUND ${p.onGround ? 1 : 0}  ATK ${p.atk ? p.atk.idx + 1 : "-"}`,
+      `FPS ${game.fps.toFixed(0)}  FX ${game.fx.count}  THEME ${getTheme().name}  LAG ${game.hitLagT.toFixed(2)}`,
+      `POS ${p.cx.toFixed(0)},${p.feet.toFixed(0)}  VX ${p.vx.toFixed(0)} VY ${p.vy.toFixed(0)}  HP ${p.hp.toFixed(0)}`,
+      `STATE ${p.state}  GROUND ${p.onGround ? 1 : 0}  SLASH ${p.slash ? p.slash.phase : "-"}`,
+      `CHARGING ${p.charging ? 1 : 0}  CHARGE ${p.charge.toFixed(2)}/${maxC}  FULL ${p.charge >= maxC - 1e-6 ? 1 : 0}`,
     ];
     lines.forEach((l, i) => drawText(s, l, 6, 30 + i * 7, C.accent, { shadow: sh }));
   }

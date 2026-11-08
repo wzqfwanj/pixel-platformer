@@ -214,6 +214,27 @@ function update(dt) {
     return;
   }
 
+  // ---- 兜底：蓄力已满却迟迟没释放，强制放出来
+  // 正常情况下 warrior.update 里 charge 到顶就 releaseCharge。
+  // 但如果这一帧被 hitLag 跳过、或者处于受伤/死亡等提前 return 的分支，
+  // 蓄力条会停在满格而什么都不发生 —— 这里兜住。
+  {
+    const pl = game.player;
+    if (pl) {
+      const maxCharge = pl.cfg.heavy.chargeMax;
+      if (pl.charging && pl.charge >= maxCharge - 1e-6) {
+        pl._fullFrames = (pl._fullFrames || 0) + 1;
+        if (pl._fullFrames > 4) {
+          // console.warn("[兜底] 蓄力已满 " + pl._fullFrames + " 帧仍未释放，强制放");
+          pl._fullFrames = 0;
+          pl.releaseCharge(game);
+        }
+      } else if (pl._fullFrames) {
+        pl._fullFrames = 0;
+      }
+    }
+  }
+
   if (game.hitLagT > 0) {
     // 命中定帧：世界几乎停住，只让特效慢慢走，打击感来源
     game.hitLagT -= dt;
@@ -578,6 +599,89 @@ async function boot() {
     const menuMeta = { scene: "menu", menuIndex: game.menu?.index, menuSelected: game.menu?.selected };
     document.documentElement.dataset.meta = JSON.stringify(menuMeta);
     fetch(new URL("__meta", postBase), { method: "POST", body: JSON.stringify(menuMeta) }).catch(() => {});
+    return;
+  }
+
+  // ---- 页面内自测：用真实键盘事件跑多种场景，检查蓄满是否每次都能释放
+  if (params.get("selftest") === "1") {
+    const scenario = params.get("scenario") || "hold";
+    const key = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true }));
+    const chargeMax = game.player.cfg.heavy.chargeMax;
+    const trace = [];
+    let releases = 0, lastSlash = null;
+    let stuckFrames = 0, worstStuck = 0;
+
+    // 按场景决定每帧要发哪些键
+    const step = (i) => {
+      switch (scenario) {
+        case "hold":
+          // 按住不放，且模拟浏览器 auto-repeat（每 2 帧重复 keydown）
+          if (i === 0 || i % 2 === 0) key("keydown", "KeyK");
+          break;
+        case "holdmove":
+          // 按住 K + 一直按右（真实玩家会边走边蓄）
+          if (i === 0 || i % 2 === 0) key("keydown", "KeyK");
+          if (i === 0) key("keydown", "KeyD");
+          break;
+        case "holdjump":
+          // 按住 K + 每 40 帧跳一次
+          if (i === 0 || i % 2 === 0) key("keydown", "KeyK");
+          if (i % 40 === 0) { key("keydown", "Space"); }
+          if (i % 40 === 10) { key("keyup", "Space"); }
+          break;
+        case "tap":
+          // 点按：按 40 帧、松 20 帧（不会蓄满，主要看会不会卡死）
+          if (i % 60 === 0) key("keydown", "KeyK");
+          if (i % 60 === 40) key("keyup", "KeyK");
+          break;
+      }
+    };
+
+    const total = 900;
+    for (let i = 0; i < total; i++) {
+      step(i);
+
+      if (game.hitLagT > 0) {
+        game.hitLagT -= 1 / 60;
+        game.fx.update((1 / 60) * 0.12, game.cam);
+        game.input.endFrame();
+        continue;
+      }
+      game.player.update(1 / 60, game.input, game);
+      game.input.endFrame();
+      game.fx.update(1 / 60, game.cam);
+
+      if (game.player.slash && !lastSlash) {
+        releases++;
+        trace.push("释放#" + releases + " @帧" + i + " k=" + game.player.slash.k.toFixed(2));
+      }
+      lastSlash = game.player.slash;
+
+      const isFull = game.player.charging && game.player.charge >= chargeMax - 1e-6;
+      if (isFull) {
+        stuckFrames++;
+        worstStuck = Math.max(worstStuck, stuckFrames);
+        if (stuckFrames === 30) {
+          trace.push("!!! 帧" + i + "：蓄力满 30 帧仍未释放 charging=" + game.player.charging +
+            " charge=" + game.player.charge.toFixed(3) + " state=" + game.player.state +
+            " hitLagT=" + game.hitLagT.toFixed(2));
+        }
+      } else stuckFrames = 0;
+    }
+    // 松手，避免残留
+    key("keyup", "KeyK");
+
+    const report = {
+      selftest: true, scenario, releases, worstStuck,
+      finalCharging: game.player.charging,
+      finalCharge: +game.player.charge.toFixed(3),
+      finalState: game.player.state,
+      finalHitLag: +game.hitLagT.toFixed(3),
+      trace: trace.slice(0, 30),
+    };
+    document.documentElement.dataset.meta = JSON.stringify(report);
+    info.textContent = "自测[" + scenario + "]：释放 " + releases + " 次，最久卡 " + worstStuck + " 帧";
+    console.log("SELFTEST " + JSON.stringify(report));
     return;
   }
 
