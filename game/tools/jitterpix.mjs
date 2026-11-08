@@ -71,9 +71,14 @@ const use = rows.filter((r) => r.state === "run" && r.bbox);
 console.log(`采样 ${rows.length} 帧，其中跑动 ${use.length} 帧\n`);
 
 const analyze = (label, pick) => {
-  const v = use.map(pick);
+  // 关键：只在【原序列 rows】里真正相邻、且两帧都为 run 时比较。
+  // 不能用 use（过滤后的数组）算差分，那会跨过中间的非 run 帧。
   const d = [];
-  for (let i = 1; i < v.length; i++) d.push(v[i] - v[i - 1]);
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1], b = rows[i];
+    if (a.state !== "run" || b.state !== "run" || !a.bbox || !b.bbox) continue;
+    d.push(pick(b) - pick(a));
+  }
   const counts = {};
   for (const x of d) counts[x] = (counts[x] ?? 0) + 1;
   let flips = 0, tiny = 0;

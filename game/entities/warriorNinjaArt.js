@@ -12,9 +12,9 @@ import { SpritePlate } from "../core/spriteplate.js";
 import { hex } from "../core/util.js";
 import { NINJA_W, NINJA_H, NINJA_PALETTE, NINJA_FRAMES } from "./ninjaFrames.js";
 
-// 2 倍放大：素材是 16x16，直接画会显得太小（关卡图块也是 16px）。
-// 像素画只做整数倍放大，边缘才保持干净。
-export const NINJA_SCALE = 2;
+// 1 倍：素材 16x16 正好是一个图块的高度，和关卡比例一致。
+// （之前试过 2 倍 = 32px = 两格高，视觉上比碰撞盒大太多，比例失调。）
+export const NINJA_SCALE = 1;
 const DW = NINJA_W * NINJA_SCALE;
 const DH = NINJA_H * NINJA_SCALE;
 

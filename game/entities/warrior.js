@@ -4,6 +4,7 @@
 import { clamp, approach, aabb, easeInQuad, easeOutQuad, easeOutCubic, smoothstep, dampAngle } from "../core/util.js";
 import { drawWarrior, WARRIOR_W, WARRIOR_H, WARRIOR_CX } from "./warriorArt.js";
 import { drawNinja, NINJA_DW, NINJA_DH } from "./warriorNinjaArt.js";
+import { drawChargeBar } from "../ui/chargebar.js";
 import { WARRIOR_PALETTE } from "../fx/fxlayer.js";
 import { SpritePlate } from "../core/spriteplate.js";
 
@@ -17,8 +18,10 @@ const BODY_OFFSET = [WARRIOR_W - 1 - WARRIOR_CX, WARRIOR_CX]; // [朝左, 朝右
 export const CFG = {
   name: "战士",
   maxHp: 120,
-  w: 10,
-  h: 22,
+  // 碰撞盒照着 16x16 素材里人物的实际占地：宽 8、高 15。
+  // 之前是 10x22，配合 32px 的绘制尺寸，视觉比碰撞范围大一圈，看起来"浮"在地上。
+  w: 8,
+  h: 15,
   runSpeed: 118,
   accel: 1500,
   airAccel: 950,
@@ -42,19 +45,19 @@ export const CFG = {
     {
       id: "slash1", windup: 0.10, active: 0.09, recover: 0.14,
       cancelHit: 0.035, cancelWhiff: 0.13,
-      dmg: 6, reach: 27, hitH: 20, fx: "melee/sword-slash",
+      dmg: 6, reach: 21, hitH: 16, fx: "melee/sword-slash",
       shake: 1.6, kb: 42, lunge: 54, hitstop: 0.045, next: 1,
     },
     {
       id: "slash2", windup: 0.085, active: 0.09, recover: 0.15,
       cancelHit: 0.03, cancelWhiff: 0.14,
-      dmg: 7, reach: 29, hitH: 20, fx: "melee/double-slash",
+      dmg: 7, reach: 23, hitH: 16, fx: "melee/double-slash",
       shake: 2.2, kb: 50, lunge: 46, hitstop: 0.05, next: 2,
     },
     {
       id: "slash3", windup: 0.125, active: 0.11, recover: 0.22,
       cancelHit: 0.05, cancelWhiff: 0.2,
-      dmg: 14, reach: 33, hitH: 24, fx: "melee/heavy-cleave",
+      dmg: 14, reach: 26, hitH: 19, fx: "melee/heavy-cleave",
       shake: 4.5, kb: 130, lunge: 78, hitstop: 0.09, crit: true,
     },
   ],
@@ -62,17 +65,17 @@ export const CFG = {
   launcher: {
     id: "launcher", windup: 0.10, active: 0.1, recover: 0.18,
     cancelHit: 0.04, cancelWhiff: 0.16,
-    dmg: 8, reach: 26, hitH: 26, fx: "melee/uppercut",
+    dmg: 8, reach: 21, hitH: 20, fx: "melee/uppercut",
     shake: 2.4, kb: 30, lunge: 40, hitstop: 0.06, lift: -230, launch: true,
   },
   // 空中攻击：下落中也能出，命中后轻微上浮，允许二段跳式的追加
   air: {
     id: "air", windup: 0.08, active: 0.1, recover: 0.16,
     cancelHit: 0.03, cancelWhiff: 0.12,
-    dmg: 6, reach: 27, hitH: 22, fx: "melee/spin-slash",
+    dmg: 6, reach: 21, hitH: 17, fx: "melee/spin-slash",
     shake: 1.8, kb: 44, lunge: 30, hitstop: 0.045, float: -40,
   },
-  heavy: { chargeMax: 0.75, dmg: 16, dmgPerCharge: 14, radius: 42, windup: 0.10, active: 0.12, recover: 0.34, shake: 6 },
+  heavy: { chargeMax: 0.75, dmg: 16, dmgPerCharge: 14, radius: 34, windup: 0.10, active: 0.12, recover: 0.34, shake: 6 },
 };
 
 export class Warrior {
@@ -620,10 +623,14 @@ export class Warrior {
       flash: this.flash > 0,
     });
 
-    // 蓄力光
+    // 蓄力光 + 头顶蓄力条
     if (this.charging) {
-      const k = this.charge / this.cfg.heavy.chargeMax;
-      s.addGlow(this.cx - camX, this.cy - camY, 14 + k * 12, 60 * k + 10, 30 * k + 4, 0);
+      const k = Math.min(1, this.charge / this.cfg.heavy.chargeMax);
+      // 光晕随蓄力变强、变大
+      s.addGlow(this.cx - camX, this.cy - camY, 14 + k * 14, 60 * k + 10, 30 * k + 4, 0);
+      // 满蓄力时再加一圈外光
+      if (k >= 0.995) s.addGlow(this.cx - camX, this.cy - camY, 26, 40, 18, 6);
+      drawChargeBar(s, this.cx - camX, this.feet - NINJA_DH - camY, k, this.t);
     }
     // 冲刺残影
     if (this.dashT > 0) {

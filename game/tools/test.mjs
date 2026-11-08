@@ -408,5 +408,19 @@ world.player = player;
   }
 }
 
+// ---- 16. 蓄力机制与蓄力条（K 键）
+{
+  const { execFileSync } = await import("node:child_process");
+  const chargePath = fileURLToPath(new URL("./charge.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [chargePath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("充满耗时")) ?? "";
+    ok(out.includes("全部通过"), "蓄力机制与蓄力条（charge.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "蓄力机制与蓄力条（charge.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
 console.log(fails ? `\n${fails} 项失败` : "\n全部通过");
 process.exit(fails ? 1 : 0);
