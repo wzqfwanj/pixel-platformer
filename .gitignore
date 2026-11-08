@@ -29,3 +29,6 @@ __pycache__/
 .agent/
 
 game/tools/frame.txt
+
+# 第三方素材仓库（用 git clone 获取源码，只需 game/ref 里的原图）
+assets/

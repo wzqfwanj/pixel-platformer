@@ -280,7 +280,7 @@ world.player = player;
   w2.player = pw;
   const cam2 = placeCamera({ x: 0, y: 0 }, pw, lv);
   const probe = new Surface(80, 60);
-  const tops = [], heights = [], centres = [];
+  const tops = [], heights = [], centres = [], topByFrame = [];
   const inp = {
     down: new Set(["right"]), just: new Set(),
     held(a) { return this.down.has(a); },
@@ -306,11 +306,29 @@ world.player = player;
     tops.push(minY);
     heights.push(maxY - minY + 1);
     centres.push({ c: centre, run: true });
+    // 和 warrior.draw() 里选帧的公式保持一致：Math.floor(animT * 10) % 4
+    topByFrame.push({ frame: Math.floor(pw.animT * 10) % 4, top: minY });
   }
   const uniqTops = [...new Set(tops)], uniqH = [...new Set(heights)];
   ok(tops.length > 60, "采到了足够的跑动帧", `${tops.length} 帧`);
-  ok(uniqTops.length === 1, "跑动时精灵竖直位置不变（无上下抖）", `上沿取值 ${JSON.stringify(uniqTops)}`);
-  ok(uniqH.length <= 2, "跑动时精灵高度稳定", `高度取值 ${JSON.stringify(uniqH)}`);
+  // 有真走路循环后，上沿会随帧在小范围内变化，这是「走路弹跳」（正确）。
+  // 最可靠的判据：同一个走路帧号必须永远对应同一个上沿 —— 随机抖动会破坏这一点。
+  const topRange = Math.max(...tops) - Math.min(...tops);
+  ok(topRange <= 2, "跑动时竖直抖动不超过 2px", `幅度 ${topRange}px，取值 ${JSON.stringify(uniqTops)}`);
+
+  const byFrame = new Map();   // 走路帧号 -> 上沿集合
+  for (const s of topByFrame) {
+    if (!byFrame.has(s.frame)) byFrame.set(s.frame, new Set());
+    byFrame.get(s.frame).add(s.top);
+  }
+  let inconsistent = 0;
+  for (const [, set] of byFrame) if (set.size > 1) inconsistent++;
+  const frameList = [...byFrame.entries()].map(([f, set]) => `f${f}:${[...set].join("/")}`).join(" ");
+  ok(inconsistent === 0,
+    "同一走路帧号对应固定的竖直位置（变化来自动画，不是抖动）",
+    frameList);
+
+  ok(uniqH.length <= 3, "跑动时精灵高度稳定", `高度取值 ${JSON.stringify(uniqH)}`);
   let back = 0;
   for (let i = 1; i < centres.length; i++) {
     // 只在连续两个跑动帧之间比较（中间夹着跳跃/落地时相机仍在跟进，不算抖）
@@ -373,6 +391,20 @@ world.player = player;
   } catch (e) {
     const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
     ok(false, "小地图检查（minimap.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
+// ---- 15. 角色素材（黑衣人帧数据 / 行走循环 / 配色 / 镜像）
+{
+  const { execFileSync } = await import("node:child_process");
+  const ninjaPath = fileURLToPath(new URL("./ninja.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [ninjaPath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("至少") && l.includes("姿势")) ?? "";
+    ok(out.includes("全部通过"), "角色素材检查（ninja.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "角色素材检查（ninja.mjs）", bad.join(" | ").slice(0, 200));
   }
 }
 

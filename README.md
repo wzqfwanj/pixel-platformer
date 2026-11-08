@@ -51,6 +51,7 @@ node game/tools/bench.mjs         # 性能基准
 
 ## 致谢
 
+- 角色素材：[Ninja Adventure Asset Pack](https://github.com/pixel-boy/NinjaAdventure) by Pixel-Boy & AAA，CC0 1.0
 - 特效库：[patch-gg/pixelfx](https://github.com/patch-gg/pixelfx) by Patch，MIT
 - 方法来源：Hugo Duprez《How to make (good) pixel-art effects with Claude》
 - 像素字体：pixelfx 自带的 3x5 / 5x7 位图字体

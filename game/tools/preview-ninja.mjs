@@ -1,7 +1,7 @@
-// 生成角色预览图：4 帧 + 在真实关卡场景里的效果。
+// 生成角色预览：素材 4 帧行走 + 游戏内实拍（待机/跑动/攻击/跳跃）。
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
-import { Surface } from "../core/screen.js";
+import { Surface, blitRect } from "../core/screen.js";
 import { hex } from "../core/util.js";
 import { Level } from "../world/level.js";
 import { Warrior } from "../entities/warrior.js";
@@ -10,8 +10,7 @@ import { FxLayer } from "../fx/fxlayer.js";
 import { bakeSky, bakeHills, PARALLAX_W } from "../world/background.js";
 import { placeCamera, renderCamera } from "../world/camera.js";
 import { drawText } from "../core/text.js";
-import { blitRect } from "../core/screen.js";
-import { REF_W, REF_H } from "../entities/warriorRefArt.js";
+import { drawNinja, NINJA_W, NINJA_H } from "../entities/warriorNinjaArt.js";
 
 const fx = new FxLayer();
 await fx.preload();
@@ -21,7 +20,6 @@ const level = new Level();
 const baked = level.bake();
 const sky = bakeSky(W, H);
 const hills = bakeHills(PARALLAX_W, H);
-
 const world = {
   level, fx, enemies: [], player: null,
   shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {},
@@ -33,12 +31,10 @@ const dummy = new Enemy("dummy", level.spawn.x + 30, level.spawn.y);
 dummy.update = () => {};
 world.enemies = [dummy];
 
-const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0, set() {} };
-for (let i = 0; i < 10; i++) p.update(1 / 60, idle, world);
+const idleIn = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0, set() {} };
+for (let i = 0; i < 10; i++) p.update(1 / 60, idleIn, world);
 
 const cam = placeCamera({ x: 0, y: 0 }, p, level);
-
-// ---- 收集若干帧的画面
 const shots = [];
 function snap(label) {
   const buf = new Surface(W, H);
@@ -56,38 +52,38 @@ function snap(label) {
   shots.push(buf);
 }
 
-// 待机
 snap("IDLE");
-// 攻击的 4 个阶段
-const input = {
-  down: new Set(), just: new Set(),
-  held(a) { return this.down.has(a); },
-  pressed(a) { return this.just.has(a); },
-  letGo: () => false,
-  axis: () => 0,
-  set(want) { this.just.clear(); for (const k of want) if (!this.down.has(k)) this.just.add(k); this.down = new Set(want); },
-};
-input.set(new Set(["attack"]));
-p.update(1 / 60, input, world);
-let lastFrame = -1;
-for (let i = 0; i < 22; i++) {
-  p.update(1 / 60, input, world);
-  input.set(new Set());
-  const f = p.pickRefFrame();
-  if (f !== lastFrame) { lastFrame = f; snap(`ATK f${f} (${p.atk ? p.atk.phase : "-"})`); }
-  if (!p.atk) break;
-}
-// 跑动
-input.set(new Set(["right"]));
-for (let i = 0; i < 20; i++) { p.update(1 / 60, input, world); input.set(new Set(["right"])); }
-snap("RUN");
+// 跑动：连续几帧看走路循环
+const runIn = { down: new Set(["right"]), just: new Set(), held: (a) => a === "right", pressed: () => false, letGo: () => false, axis: () => 1, set() {} };
+for (let i = 0; i < 14; i++) p.update(1 / 60, runIn, world);
+snap("RUN a");
+for (let i = 0; i < 6; i++) p.update(1 / 60, runIn, world);
+snap("RUN b");
+for (let i = 0; i < 6; i++) p.update(1 / 60, runIn, world);
+snap("RUN c");
 
-// ---- 拼图：2 列
-const cols = 2;
-const rows = Math.ceil(shots.length / cols);
+// 攻击
+const atkIn = { down: new Set(), just: new Set(["attack"]), held: () => false, pressed: (a) => a === "attack", letGo: () => false, axis: () => 0, set() {} };
+p.update(1 / 60, atkIn, world);
+atkIn.just.clear();
+let shotAtk = 0;
+for (let i = 0; i < 24; i++) {
+  p.update(1 / 60, atkIn, world);
+  if (p.atk && p.atk.phase === "active" && shotAtk === 0) { snap("ATTACK"); shotAtk = 1; }
+}
+// 跳跃
+const jumpIn = { down: new Set(["jump"]), just: new Set(["jump"]), held: (a) => a === "jump", pressed: (a) => a === "jump", letGo: () => false, axis: () => 0, set() {} };
+p.update(1 / 60, jumpIn, world);
+jumpIn.just.clear();
+for (let i = 0; i < 8; i++) p.update(1 / 60, jumpIn, world);
+snap("JUMP");
+
+// ---- 拼图
+const cols = 3;
+const rowsN = Math.ceil(shots.length / cols);
 const PAD = 4;
 const OW = cols * (W + PAD) + PAD;
-const OH = rows * (H + PAD) + PAD;
+const OH = rowsN * (H + PAD) + PAD;
 const out = new Surface(OW, OH);
 out.clear(hex("#101018"));
 shots.forEach((sh, i) => {
@@ -100,7 +96,6 @@ shots.forEach((sh, i) => {
     }
 });
 
-// ---- 编码 PNG（放大 2 倍）
 const K = 2;
 const pw = OW * K, ph = OH * K;
 const rgba = new Uint8Array(pw * ph * 4);
@@ -129,6 +124,5 @@ function encodePNG(w, h, d) {
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
 }
-writeFileSync("preview-refchar-game.png", encodePNG(pw, ph, rgba));
-console.log(`已写出 preview-refchar-game.png（${pw}x${ph}，${shots.length} 格）`);
-console.log("标签：" + shots.length + " 格 = IDLE + 攻击各阶段 + RUN");
+writeFileSync("preview-ninja-game.png", encodePNG(pw, ph, rgba));
+console.log(`已写出 preview-ninja-game.png（${pw}x${ph}，${shots.length} 格）`);

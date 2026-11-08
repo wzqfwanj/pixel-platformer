@@ -3,7 +3,7 @@
 
 import { clamp, approach, aabb, easeInQuad, easeOutQuad, easeOutCubic, smoothstep, dampAngle } from "../core/util.js";
 import { drawWarrior, WARRIOR_W, WARRIOR_H, WARRIOR_CX } from "./warriorArt.js";
-import { drawRefWarrior, REF_W, REF_H, REF_AXIS_X } from "./warriorRefArt.js";
+import { drawNinja, NINJA_DW, NINJA_DH } from "./warriorNinjaArt.js";
 import { WARRIOR_PALETTE } from "../fx/fxlayer.js";
 import { SpritePlate } from "../core/spriteplate.js";
 
@@ -550,48 +550,75 @@ export class Warrior {
     for (let i = 0; i < sw; i++) s.blendPx(shx + i, shy, 0xff000000, 0.35);
     for (let i = 1; i < sw - 1; i++) s.blendPx(shx + i, shy - 1, 0xff000000, 0.18);
 
-    // ---- 用参考图转出来的 4 帧来画
-    const pose = this.pose();
-    const frame = this.pickRefFrame();
-
-    // 姿态变换（只做整数像素，保持像素干净）
+    // ---- 选素材里的动作和帧
+    // 素材只有：行走 4 帧 + 攻击/跳跃/死亡各 1 帧，
+    // 所以行走用真循环，其他动作靠姿态变换补动感。
+    let anim = "walk";
+    let frame = 0;
     let tilt = 0, stretch = 1, lift = 0;
-    if (this.atk) {
+
+    if (this.state === "dead") {
+      anim = "dead";
+    } else if (this.state === "hurt") {
+      anim = "jump";
+      tilt = -this.facing * 0.8;
+    } else if (this.atk) {
       const a = this.atk, c = a.cfg;
-      const t2 = c.windup + c.active;
-      if (a.t >= c.windup && a.t < t2) {
-        // 出刀瞬间身体前倾
-        const u = (a.t - c.windup) / c.active;
-        tilt = this.facing * (0.35 + 0.65 * Math.sin(u * Math.PI));
-        stretch = 1 + 0.05 * Math.sin(u * Math.PI);
-      } else if (a.t >= t2) {
-        const u = Math.min(1, (a.t - t2) / c.recover);
-        tilt = -this.facing * 0.3 * (1 - u);
+      const t1 = c.windup, t2 = c.windup + c.active;
+      anim = "attack";
+      if (a.t < t1) {
+        // 起手：身体后仰蓄势
+        const u = a.t / Math.max(1e-4, t1);
+        tilt = -this.facing * 0.45 * u;
+        stretch = 1 + 0.03 * u;
+      } else if (a.t < t2) {
+        // 出刀：前冲 + 拉伸
+        const u = (a.t - t1) / Math.max(1e-4, c.active);
+        tilt = this.facing * (0.5 + 0.9 * Math.sin(u * Math.PI));
+        stretch = 1 + 0.07 * Math.sin(u * Math.PI);
+      } else {
+        const u = Math.min(1, (a.t - t2) / Math.max(1e-4, c.recover));
+        tilt = this.facing * 0.4 * (1 - u);
       }
-    } else if (this.state === "dash") {
-      tilt = this.facing * 1.0;
+    } else if (this.slam) {
+      anim = this.slam.phase === "windup" ? "jump" : "attack";
+      stretch = this.slam.phase === "windup" ? 1.08 : 0.94;
+      tilt = this.slam.phase === "windup" ? -this.facing * 0.4 : this.facing * 0.6;
     } else if (this.charging) {
-      stretch = 0.96;
+      // 蓄力：压低身体
+      anim = "walk";
+      frame = 0;
+      stretch = 0.94;
+      tilt = -this.facing * 0.25;
+    } else if (this.dashT > 0) {
+      anim = "walk";
+      frame = 3;
+      tilt = this.facing * 1.1;
+      stretch = 1.04;
     } else if (!this.onGround) {
-      stretch = this.vy < 0 ? 1.06 : 0.97;
+      anim = "jump";
+      stretch = this.vy < 0 ? 1.08 : 0.96;
       lift = 1;
     } else if (Math.abs(this.vx) > 12) {
-      // 跑动：身体轻微起伏 + 前倾（只有 4 帧图，靠姿态补动感）
-      const ph = (this.animT * 9) % 2;
-      stretch = ph < 1 ? 1.02 : 0.99;
-      tilt = this.facing * 0.35;
+      // 跑步：用素材的 4 帧行走循环，速度跟着实际移速
+      anim = "walk";
+      frame = Math.floor(this.animT * 10) % 4;
+      tilt = this.facing * 0.4;
     } else {
-      // 待机呼吸
-      const br = Math.sin(this.t * 3.2);
-      stretch = 1 + br * 0.012;
+      // 待机：停在行走第 0 帧，轻微呼吸
+      anim = "walk";
+      frame = 0;
+      stretch = 1 + Math.sin(this.t * 3.2) * 0.012;
     }
-    if (this.state === "hurt") tilt = -this.facing * 0.6;
 
-    // 精灵水平位置：按"身体轴线"对齐碰撞盒中心，而不是按图片左边缘
-    const px = Math.round(this.cx) - REF_AXIS_X - camX;
-    const py = Math.round(this.feet) - REF_H + 1 - camY;
+    // 精灵位置：素材是 16x16，脚底对齐碰撞盒底部，水平按中心对齐
+    const px = Math.round(this.cx) - Math.floor(NINJA_DW / 2) - camX;
+    const py = Math.round(this.feet) - NINJA_DH - camY;
 
-    drawRefWarrior(s, px, py, this.facing, frame, { tilt, stretch, lift });
+    drawNinja(s, px, py, this.facing, anim, frame, {
+      tilt, stretch, lift,
+      flash: this.flash > 0,
+    });
 
     // 蓄力光
     if (this.charging) {
@@ -607,14 +634,6 @@ export class Warrior {
     }
   }
 
-  /**
-   * 计算这一帧的目标姿态（全部是浮点，不取整 —— 取整交给绘制层）。
-   *
-   * 丝滑感来自三件事：
-   *   1. 出刀用 easeOutCubic：开头极快、末端减速，视觉上"啪"一下甩出去
-   *   2. 收招用 easeOutQuad：慢慢回位，不会突兀弹回
-   *   3. 非攻击状态下，剑的角度用 dampAngle 朝目标平滑（状态切换不硬切）
-   */
   computePose() {
     const p = {
       legs: "stand", phase: 0, bob: 0, lean: 0, stretch: 1,
@@ -758,29 +777,6 @@ export class Warrior {
    * 对外的姿态：把目标姿态和时间做混合，得到最终这一帧要画的东西。
    * 攻击中不做平滑（要的就是"啪"一下），其他状态用指数平滑消除硬切。
    */
-  /**
-   * 选参考图的第几帧。
-   * 4 帧的含义（按参考图的差异推断）：
-   *   0 = 手臂收在身侧（待机 / 起手）
-   *   1 = 手臂开始前伸
-   *   2 = 前伸最多（出招最远的瞬间）
-   *   3 = 收回 / 受创
-   */
-  pickRefFrame() {
-    if (this.atk) {
-      const a = this.atk, c = a.cfg;
-      const t1 = c.windup, t2 = c.windup + c.active;
-      if (a.t < t1) return 0;
-      if (a.t < t1 + c.active * 0.5) return 1;
-      if (a.t < t2) return 2;
-      return 3;
-    }
-    if (this.state === "hurt" || this.state === "dead") return 3;
-    if (this.charging) return 0;
-    if (!this.onGround) return this.vy < 0 ? 1 : 3;
-    return 0;
-  }
-
   pose() {
     const target = this.computePose();
 
