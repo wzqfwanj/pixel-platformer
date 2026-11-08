@@ -34,53 +34,12 @@ export const CFG = {
   dashSpeed: 265,
   dashTime: 0.13,
   dashCd: 0.42,
-  comboWindow: 0.34,
-  attackBuffer: 0.22,   // 攻击键输入缓冲：按早了会存着，窗口一开自动接
-  // 每段招式的时间轴（秒）：
-  //   windup  起手 → active 判定窗口 → recover 后摇
-  //   cancelHit  命中后从这一刻起可以取消进下一段（贴着 active 结束）
-  //   cancelWhiff 落空后从这一刻起才能取消（几乎要等完整后摇）
-  // 这个"打中就连得上、打空就要罚站"是格斗游戏连招丝滑感的来源。
-  combo: [
-    {
-      id: "slash1", windup: 0.10, active: 0.09, recover: 0.14,
-      cancelHit: 0.035, cancelWhiff: 0.13,
-      dmg: 6, reach: 21, hitH: 16, fx: "melee/sword-slash",
-      shake: 1.6, kb: 42, lunge: 54, hitstop: 0.045, next: 1,
-    },
-    {
-      id: "slash2", windup: 0.085, active: 0.09, recover: 0.15,
-      cancelHit: 0.03, cancelWhiff: 0.14,
-      dmg: 7, reach: 23, hitH: 16, fx: "melee/double-slash",
-      shake: 2.2, kb: 50, lunge: 46, hitstop: 0.05, next: 2,
-    },
-    {
-      id: "slash3", windup: 0.125, active: 0.11, recover: 0.22,
-      cancelHit: 0.05, cancelWhiff: 0.2,
-      dmg: 14, reach: 26, hitH: 19, fx: "melee/heavy-cleave",
-      shake: 4.5, kb: 130, lunge: 78, hitstop: 0.09, crit: true,
-    },
-  ],
-  // 上挑：按住上再攻击。把敌人挑浮空，之后可以接空中连段
-  launcher: {
-    id: "launcher", windup: 0.10, active: 0.1, recover: 0.18,
-    cancelHit: 0.04, cancelWhiff: 0.16,
-    dmg: 8, reach: 21, hitH: 20, fx: "melee/uppercut",
-    shake: 2.4, kb: 30, lunge: 40, hitstop: 0.06, lift: -230, launch: true,
-  },
-  // 空中攻击：下落中也能出，命中后轻微上浮，允许二段跳式的追加
-  air: {
-    id: "air", windup: 0.08, active: 0.1, recover: 0.16,
-    cancelHit: 0.03, cancelWhiff: 0.12,
-    dmg: 6, reach: 21, hitH: 17, fx: "melee/spin-slash",
-    shake: 1.8, kb: 44, lunge: 30, hitstop: 0.045, float: -40,
-  },
   // 蓄力斩（K）：唯一的长按技能。
   // 判定是一条从身前伸出的横向长条，能同时砍到多个敌人（穿透），
   // 蓄满时距离和伤害都涨。和之前的圆形砸地相比，更强调"向前打穿"而不是"原地清场"。
   heavy: {
     id: "chargeSlash",
-    chargeMax: 0.75,
+    chargeMax: 0.55,   // 唯一攻击手段，蓄力时间不能太长
     dmg: 14,
     dmgPerCharge: 16,     // 蓄满总伤害 = 14 + 16 = 30
     reachBase: 30,        // 基础攻击距离
@@ -122,9 +81,6 @@ export class Warrior {
     this.flash = 0;
     this.hurtT = 0;
     this.deadT = 0;
-    this.atk = null;      // { idx, t, phase, hits:Set, cfg }
-    this.comboTimer = 0;
-    this.comboIdx = 0;
     this.queued = false;
     this.charging = false;
     this.charge = 0;
@@ -148,8 +104,6 @@ export class Warrior {
     this.flash = 0.12;
     this.hurtT = 0.22;
     this.state = "hurt";
-    this.atk = null;
-    this.attackBuffer = 0;
     this.charging = false;
     if (this.chargeFx) { this.chargeFx.fx.stop(); this.chargeFx = null; }
     const dir = Math.sign(this.cx - fromX) || 1;
@@ -169,50 +123,11 @@ export class Warrior {
   }
 
   // ---------- 攻击 ----------
-  /**
-   * 起一招。kind: "combo"（三段连招，可指定第几段）| "launcher"（上挑）| "air"（空中斩）
-   * 用统一入口，派生招式才好加。
-   */
-  startMove(kind, world, comboIdx = 0) {
-    const cfg = this.cfg;
-    let c, idx = 0;
-    if (kind === "launcher") {
-      c = cfg.launcher;
-    } else if (kind === "air") {
-      c = cfg.air;
-    } else {
-      idx = comboIdx % cfg.combo.length;
-      c = cfg.combo[idx];
-    }
-
-    this.atk = {
-      idx, kind, t: 0, phase: "windup",
-      hits: new Set(), hitCount: 0, hit: false, cfg: c,
-    };
-    this.state = "attack";
-    this.comboIdx = kind === "combo" ? idx + 1 : this.comboIdx;
-    this.comboTimer = 0;
-    this.charging = false;
-    this.queued = false;
-    this.facingLock = this.facing;
-    // 记下出招瞬间剑的角度：起手动作从这里出发，而不是硬切到固定姿势
-    this.attackEnterAngle = this.swordAngle ?? Math.PI / 2.2;
-    if (this.chargeFx) { this.chargeFx.fx.stop(); this.chargeFx = null; }
-    // 起手时收住一点速度，但保留惯性（空中攻击不该急停）
-    if (this.onGround) this.vx *= 0.45;
-    else this.vx *= 0.8;
-  }
-
-  /** 兼容旧调用 */
-  startAttack(world) {
-    this.startMove("combo", world, this.comboIdx % this.cfg.combo.length);
-  }
 
   startCharge(world) {
     if (this.state === "dead" || this.charging) return;
     this.charging = true;
     this.charge = 0;
-    this.atk = null;
     this.state = "attack";
     this.chargeFx = world.fx.spawn("lightning/charge-up", this.cx, this.feet - 4, {
       palette: ["#2a1024", "#5a1a2a", "#a83a2a", "#e87a2a", "#ffc04a", "#fff0b0", "#ffffff"],
@@ -228,7 +143,6 @@ export class Warrior {
     // 松手进入蓄力斩的动作（前摇 -> 判定 -> 后摇），地面空中都能放
     this.slash = { t: 0, phase: "windup", k, hits: new Set() };
     this.state = "attack";
-    this.comboTimer = 0;
     this.charge = 0;
     if (this.onGround) this.vx *= 0.3;
   }
@@ -291,14 +205,11 @@ export class Warrior {
     this.invuln = Math.max(0, this.invuln - dt);
     this.flash = Math.max(0, this.flash - dt);
     this.dashCd = Math.max(0, this.dashCd - dt);
-    this.comboTimer = Math.max(0, this.comboTimer - dt);
-    this.attackBuffer = Math.max(0, this.attackBuffer - dt);
     if (this.dashInvuln > 0) {
       this.dashInvuln = Math.max(0, this.dashInvuln - dt);
       // 冲刺无敌独立于受击无敌，用较长的那个
       if (this.invuln < this.dashInvuln) this.invuln = this.dashInvuln;
     }
-    if (this.comboTimer <= 0 && !this.atk) this.comboIdx = 0;
 
     if (this.state === "dead") {
       this.deadT += dt;
@@ -311,7 +222,7 @@ export class Warrior {
     const L = world.level;
     const dir = input.axis();
     // 攻击中不转身（挥砍朝向锁定到这一段结束），只允许在起手前/后摇末尾调整
-    const canTurn = this.state !== "hurt" && !this.atk;
+    const canTurn = this.state !== "hurt" && !this.slash;
     if (dir !== 0 && canTurn) this.facing = dir;
 
     // ---- 计时器
@@ -331,8 +242,13 @@ export class Warrior {
     // ---- 蓄力中
     if (this.charging) {
       this.charge = Math.min(this.cfg.heavy.chargeMax, this.charge + dt);
-      this.vx = approach(this.vx, dir * this.cfg.runSpeed * 0.35, this.cfg.accel * dt);
-      if (input.letGo("heavy") || !input.held("heavy")) this.releaseCharge(world);
+      // 蓄力时保留 70% 移速：唯一的攻击手段是蓄力斩，必须能边退边蓄
+      this.vx = approach(this.vx, dir * this.cfg.runSpeed * 0.7, this.cfg.accel * dt);
+
+      // 松手放，或者蓄满自动放。
+      // 自动释放很重要：不然玩家按住不放会一直卡在蓄满状态，什么都不发生。
+      const full = this.charge >= this.cfg.heavy.chargeMax - 1e-6;
+      if (input.letGo("heavy") || !input.held("heavy") || full) this.releaseCharge(world);
       this.physics(dt, L);
       this.checkHazards(world);
       return;
@@ -365,105 +281,6 @@ export class Warrior {
       return;
     }
 
-    // ---- 攻击中
-    if (this.atk) {
-      const a = this.atk, c = a.cfg;
-      a.t += dt;
-
-      const t1 = c.windup, t2 = c.windup + c.active;
-
-      // 出刀瞬间：放特效 + 突进
-      if (a.phase === "windup" && a.t >= t1) {
-        a.phase = "active";
-        world.fx.spawn(c.fx, this.cx + this.facing * 11, this.feet - 21, {
-          flip: this.facing < 0,
-          palette: WARRIOR_PALETTE,
-          seed: Math.random() * 100,
-        });
-        // 招式自带的向前突进（"贴上去"的感觉）
-        if (c.lunge) this.vx = this.facing * c.lunge;
-      }
-
-      // 判定窗口
-      if (a.phase === "active") {
-        const hb = {
-          x: this.facing > 0 ? this.x + this.w - 4 : this.x - c.reach + 4,
-          y: this.y + 1,
-          w: c.reach,
-          h: c.hitH,
-        };
-        for (const e of world.enemies) {
-          if (e.dead || a.hits.has(e)) continue;
-          if (aabb(hb, e.box)) {
-            a.hits.add(e);
-            a.hitCount++;
-            const dir = this.facing;
-            e.takeDamage(c.dmg, this.cx, world, !!c.crit, {
-              kb: c.kb, lift: c.lift, stun: c.launch ? 0.4 : 0.18,
-            });
-            world.onHit?.(1, c);
-            // 命中定格：招式越重停越久（打击感核心）
-            world.hitLag(c.hitstop);
-            world.shake(c.shake);
-            // 命中后角色自己的位移刹住（冲击回馈）
-            this.vx *= 0.25;
-            // 空中攻击命中：给一点上浮，方便追加
-            if (c.float && !this.onGround) this.vy = Math.min(this.vy, c.float);
-            if (c.launch) {
-              // 上挑踢自己一点点离地，形成"挑起来追打"的节奏
-              this.vy = Math.min(this.vy, -80);
-            }
-            a.hit = true;
-          }
-        }
-      }
-
-      // 攻击键缓冲（按早了存着，窗口一开就用）
-      // 按住也算：按住不放就会自己连下去，符合大多数动作游戏的直觉
-      if (input.pressed("attack") || input.held("attack")) {
-        this.attackBuffer = this.cfg.attackBuffer;
-        this.lastBufferPeak = Math.max(this.lastBufferPeak ?? 0, this.attackBuffer);
-      }
-
-      // 取消窗口：命中后很快就能接，落空要接近完整后摇
-      const cancelAt = a.hit ? t2 + c.cancelHit : t2 + c.cancelWhiff;
-      const finished = a.t >= t2 + c.recover;
-
-      if (a.t >= cancelAt && this.attackBuffer > 0) {
-        this.attackBuffer = 0;   // 消费掉这次输入
-        // 决定下一招：上挑 / 连段 / 空中
-        const wantUp = input.held("up");
-        this.atk = null;
-        if (wantUp && this.onGround) this.startMove("launcher", world);
-        else if (!this.onGround) this.startMove("air", world);
-        else if (c.next !== undefined && c.next < this.cfg.combo.length) this.startMove("combo", world, c.next);
-        else this.startMove("combo", world, 0);
-        this.physics(dt, L);
-        return;
-      }
-
-      if (finished) {
-        this.comboTimer = this.cfg.comboWindow;
-        this.atk = null;
-        this.state = this.onGround ? "idle" : "fall";
-        // 后摇结束时如果还按着攻击键，直接续上（更宽容）
-        if (this.attackBuffer > 0 && this.comboTimer > 0) {
-          this.attackBuffer = 0;
-          if (input.held("up") && this.onGround) this.startMove("launcher", world);
-          else if (!this.onGround) this.startMove("air", world);
-          else this.startMove("combo", world, 0);
-          this.physics(dt, L);
-          return;
-        }
-      }
-
-      // 攻击中水平速度快速衰减（保留突进的前冲感）
-      const drag = a.t < t2 ? 0.6 : 3.2;
-      this.vx = approach(this.vx, dir * this.cfg.runSpeed * 0.12, this.cfg.accel * drag * dt);
-      this.physics(dt, L);
-      this.checkHazards(world);
-      return;
-    }
 
   // ---- 冲刺
     if (this.dashT > 0) {
@@ -485,12 +302,10 @@ export class Warrior {
       world.fx.spawn("impacts/hit-spark", this.cx - this.facing * 6, this.cy, { flip: this.facing < 0, palette: WARRIOR_PALETTE, seed: Math.random() * 100 });
       return;
     }
-    if (input.pressed("heavy")) { this.startCharge(world); return; }
-    if (input.pressed("attack")) {
-      // 派生：按住上 = 上挑；空中 = 空中斩；否则起三段连招
-      if (!this.onGround) this.startMove("air", world);
-      else if (input.held("up")) this.startMove("launcher", world);
-      else this.startMove("combo", world, this.comboIdx % this.cfg.combo.length);
+    // 按下或【持续按住】都能起蓄力：
+    // 受击会打断蓄力，如果只认按下，玩家按住 K 时会永远卡在"没在蓄力"的状态。
+    if ((input.pressed("heavy") || input.held("heavy")) && !this.charging && !this.slash) {
+      this.startCharge(world);
       return;
     }
 
@@ -621,24 +436,6 @@ export class Warrior {
     } else if (this.state === "hurt") {
       anim = "jump";
       tilt = -this.facing * 0.8;
-    } else if (this.atk) {
-      const a = this.atk, c = a.cfg;
-      const t1 = c.windup, t2 = c.windup + c.active;
-      anim = "attack";
-      if (a.t < t1) {
-        // 起手：身体后仰蓄势
-        const u = a.t / Math.max(1e-4, t1);
-        tilt = -this.facing * 0.45 * u;
-        stretch = 1 + 0.03 * u;
-      } else if (a.t < t2) {
-        // 出刀：前冲 + 拉伸
-        const u = (a.t - t1) / Math.max(1e-4, c.active);
-        tilt = this.facing * (0.5 + 0.9 * Math.sin(u * Math.PI));
-        stretch = 1 + 0.07 * Math.sin(u * Math.PI);
-      } else {
-        const u = Math.min(1, (a.t - t2) / Math.max(1e-4, c.recover));
-        tilt = this.facing * 0.4 * (1 - u);
-      }
     } else if (this.slash) {
       // 蓄力斩：前摇后仰，出刀前冲压低
       const H = this.cfg.heavy;
@@ -651,7 +448,6 @@ export class Warrior {
         stretch = 0.93;
         tilt = this.facing * 0.8;
       }
-    } else if (this.charging) {
     } else if (this.charging) {
       // 蓄力：压低身体
       anim = "walk";
@@ -762,56 +558,6 @@ export class Warrior {
       return p;
     }
 
-    if (this.atk) {
-      const a = this.atk, c = a.cfg;
-      p.legs = "attack";
-
-      // 每段连招的关键姿势：[起手位, 挥砍落点, 收势位]
-      // 注意起手不再是一个固定角度 —— 由 attackEnterAngle（按下去那一刻剑在哪）动态决定，
-      // 这样"站立/跑步/上一段收招"切到这一段时都是连续过渡，没有瞬移。
-      const arcs = {
-        0: [-1.95, 0.62, 1.12],
-        1: [0.95, -0.62, -1.25],
-        2: [-2.45, 1.18, 1.38],
-      };
-      const arc = a.kind === "launcher"
-        ? [2.3, -1.35, -0.9]      // 上挑：从下往上撩
-        : a.kind === "air"
-          ? [-1.6, 1.9, 2.2]      // 空中：下劈
-          : arcs[a.idx % 3];
-
-      const enter = this.attackEnterAngle ?? arc[0];
-      const t = a.t;
-      const t1 = c.windup, t2 = c.windup + c.active;
-      let ang;
-      if (t < t1) {
-        // 起手：从当前角度拉到蓄力位。
-        // smoothstep 两端导数都为 0 —— 起步柔和、到蓄力位速度正好归零，
-        // 于是"拉开 -> 顿一下 -> 甩出去"连成一条没有速度突变的曲线。
-        const u = clamp(t / t1, 0, 1);
-        ang = enter + (arc[0] - enter) * smoothstep(u);
-        p.lean = -1.2 * u;
-        p.stretch = 1 + 0.05 * u;
-        p.bob = -0.6 * u;
-      } else if (t < t2) {
-        // 出刀：爆发式开始、末端减速 —— 这一段决定"脆不脆"
-        const u = clamp((t - t1) / c.active, 0, 1);
-        ang = arc[0] + (arc[1] - arc[0]) * easeOutCubic(u);
-        p.lean = 2.4 * easeOutCubic(u);
-        p.stretch = 1 + 0.1 * Math.sin(u * Math.PI);
-        p.bob = 0.8 * easeOutCubic(u);
-        p.trail = this.trail;
-      } else {
-        // 收招：慢慢回位
-        const u = clamp((t - t2) / c.recover, 0, 1);
-        ang = arc[1] + (arc[2] - arc[1]) * easeOutQuad(u);
-        p.lean = 2.4 * (1 - easeOutQuad(u));
-        p.stretch = 1 - 0.04 * Math.sin(u * Math.PI);
-        p.bob = 0.8 * (1 - easeOutQuad(u));
-      }
-      p.sword = ang;
-      return p;
-    }
 
     if (this.state === "hurt") {
       p.legs = "fall";
@@ -863,8 +609,9 @@ export class Warrior {
   pose() {
     const target = this.computePose();
 
-    // 刀光拖尾：攻击判定期间每帧记一个角度
-    if (this.atk && this.atk.phase === "active") {
+    // 刀光拖尾：蓄力斩判定期间每帧记一个角度
+    const slashing = this.slash && this.slash.phase === "active";
+    if (slashing) {
       this.trail = this.trail ?? [];
       this.trail.unshift(target.sword);
       if (this.trail.length > 4) this.trail.pop();
@@ -876,7 +623,7 @@ export class Warrior {
     // 第一次调用时直接对齐，避免从 0 开始平滑导致手臂乱甩
     if (this.swordAngle === undefined) this.swordAngle = target.sword;
 
-    const attacking = !!this.atk;
+    const attacking = !!this.slash;
     if (attacking) {
       // 挥砍/收招：完全按缓动走（要的就是脆）
       this.swordAngle = target.sword;
@@ -885,7 +632,7 @@ export class Warrior {
       this.swordAngle = dampAngle(this.swordAngle, target.sword, 0.055, this._dt ?? 1 / 60);
     }
 
-    const out = { ...target, sword: this.swordAngle, trail: this.atk && this.atk.phase === "active" ? this.trail : null };
+    const out = { ...target, sword: this.swordAngle, trail: this.slash && this.slash.phase === "active" ? this.trail : null };
     return out;
   }
 }

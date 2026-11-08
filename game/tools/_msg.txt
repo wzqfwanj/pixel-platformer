@@ -1,0 +1,41 @@
+攻击方式只保留 K 蓄力斩
+
+之前理解错了：以为"只留一个 k 技能"是把 K 改成蓄力斩，
+实际要求是【攻击方式只有 K】。现在三段连招、上挑、空中斩全部删除。
+
+删除清单：
+- CFG.combo / launcher / air（34 行招式数据）
+- startMove / startAttack 方法
+- update 里的 this.atk 攻击分支（98 行）
+- computePose / pose / draw 里的 atk 分支
+- comboIdx / comboTimer / attackBuffer 全部状态
+- 输入映射里的 attack 键（J/X）
+- tools/combo.mjs、tools/smooth.mjs（验证已删除的连招系统）
+
+warrior.js 从 851 行降到 631 行，剩下 3 个攻击相关方法：
+startCharge / releaseCharge / doChargeSlash。
+
+过程中发现并修的三个真问题：
+
+1. 蓄满卡住：蓄满后必须主动松手才出刀，玩家按住不放会永远停在蓄满状态，
+   什么都不发生。改成蓄满自动释放。
+
+2. 被打断后无法重蓄：受击会取消 charging，但 startCharge 只认 pressed()
+   边沿事件，玩家还按着 K 却永远进不了蓄力。改成 held 也能起蓄力。
+
+3. 站桩必死（平衡）：蓄力 0.75s + 蓄力时只有 35% 移速，敌人贴身时
+   根本蓄不满。调整：
+   - chargeMax 0.75 -> 0.55
+   - 蓄力时移速 35% -> 70%（可以边后撤边蓄力）
+   - 受击只衰减一半蓄力，不清零
+
+调整后实测（种子固定的机器人模拟）：
+   游击打法：存活 81 秒，杀 20 只
+   站桩打法：存活 15 秒，杀 0 只
+说明"保持距离蓄力"才是正确玩法，站桩会死。
+
+测试：
+- 新增 tools/attack.mjs（7 项 + 蓄满自动释放），接入主测试第 17 项
+- 删除 combo.mjs / smooth.mjs 及其检查块
+- simcore 机器人改为游击打法，输入桩补上 letGo（之前缺失导致永远不松手）
+- endless.mjs 第 6 项改用蓄力斩打法，删除基于连招的过时断言

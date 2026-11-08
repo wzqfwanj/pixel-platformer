@@ -13,14 +13,18 @@ function makeInput() {
   return {
     down: new Set(),
     just: new Set(),
+    rel: new Set(),
     held(a) { return this.down.has(a); },
     pressed(a) { return this.just.has(a); },
-    letGo: () => false,
+    // 关键：蓄力斩靠"松手"触发，letGo 必须是真实的边沿事件
+    letGo(a) { return this.rel.has(a); },
     axis() { return (this.down.has("right") ? 1 : 0) - (this.down.has("left") ? 1 : 0); },
-    /** 设定这一帧想按的键 */
+    /** 设定这一帧想按的键（自动算出"新按下"和"刚松开"） */
     set(want) {
       this.just.clear();
+      this.rel.clear();
       for (const k of want) if (!this.down.has(k)) this.just.add(k);
+      for (const k of this.down) if (!want.has(k)) this.rel.add(k);
       this.down = new Set(want);
     },
   };
@@ -82,15 +86,26 @@ export function run(strategy, maxSeconds = 180, verbose = false, seed0 = 2024) {
 }
 
 // 只砍不躲
+// 蓄力斩是唯一攻击，且蓄满要 0.55s —— 站桩硬换一定死。
+// 正确打法是"保持中距离游击"：退到 40~70px 蓄力，蓄满自动出刀。
+const SAFE_DIST = 46;
 export const fightOnly = (p, world) => {
   const want = new Set();
   const alive = world.enemies.filter((e) => !e.dead);
   if (!alive.length || p.state === "dead") return want;
   const near = alive.reduce((a, b) => (Math.abs(a.cx - p.cx) < Math.abs(b.cx - p.cx) ? a : b));
   const dx = near.cx - p.cx;
-  // 攻击范围：身体中心算起约 28px，留点余量取 26
-  if (Math.abs(dx) > 20) want.add(dx > 0 ? "right" : "left");
-  if (Math.abs(dx) < 26) want.add("attack");
+  const dist = Math.abs(dx);
+
+  if (p.slash) return want;            // 出刀中不操作
+
+  if (dist < SAFE_DIST - 12) {
+    want.add(dx > 0 ? "left" : "right");   // 太近，后撤
+    if (p.charging) want.add("heavy");      // 边退边蓄
+  } else {
+    want.add("heavy");                      // 中距离蓄力
+    if (dist > 70) want.add(dx > 0 ? "right" : "left");
+  }
   return want;
 };
 
@@ -101,7 +116,7 @@ export const fightDash = (p, world, f) => {
   const close = alive.filter((e) => Math.abs(e.cx - p.cx) < 18).length;
   if (close >= 2 && p.dashCd <= 0) {
     const near = alive.reduce((a, b) => (Math.abs(a.cx - p.cx) < Math.abs(b.cx - p.cx) ? a : b));
-    want.delete("attack");
+    want.delete("heavy");   // 冲刺时松手，避免蓄力被浪费
     want.add("dash");
     want.add(near.cx > p.cx ? "left" : "right");
   }

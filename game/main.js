@@ -357,19 +357,19 @@ function drawExit(s, cam, colors) {
 const SCRIPTS = {
   idle: [],
   endless: [
-    [0, 40, "right"], [40, 70, "attack"], [60, 90, "attack"],
-    [90, 130, "left"], [130, 160, "attack"], [150, 180, "attack"],
-    [180, 240, "right"], [240, 280, "attack"], [270, 300, "attack"],
+    [0, 40, "right"], [40, 70, "heavy"], [60, 90, "heavy"],
+    [90, 130, "left"], [130, 160, "heavy"], [150, 180, "heavy"],
+    [180, 240, "right"], [240, 280, "heavy"], [270, 300, "heavy"],
     [300, 360, "left"],
   ],
   run: [[0, 400, "right"]],
   combat: [
-    [0, 70, "right"], [70, 90, "attack"], [80, 100, "attack"], [95, 120, "attack"],
+    [0, 70, "right"], [70, 90, "heavy"], [80, 100, "heavy"], [95, 120, "heavy"],
     [130, 190, "right"], [190, 215, "jump"], [200, 260, "right"],
-    [262, 292, "heavy"], [300, 340, "right"], [345, 375, "attack"],
+    [262, 292, "heavy"], [300, 340, "right"], [345, 375, "heavy"],
   ],
   showcase: [
-    [0, 62, "right"], [62, 86, "attack"], [78, 104, "attack"], [96, 128, "attack"],
+    [0, 62, "right"], [62, 86, "heavy"], [78, 104, "heavy"], [96, 128, "heavy"],
     [140, 200, "heavy"], [206, 250, "right"],
   ],
   explore: [[0, 240, "right"], [60, 74, "jump"], [120, 134, "jump"], [180, 194, "jump"]],
@@ -406,7 +406,7 @@ function makeScriptedInput(scriptName) {
         ai.jumpHold = 13;
         want.add("jump");
       }
-      if (game.enemies.find((e) => !e.dead && Math.abs(e.cx - p.cx) < 34 && Math.abs(e.cy - p.cy) < 30)) want.add("attack");
+      if (game.enemies.find((e) => !e.dead && Math.abs(e.cx - p.cx) < 34 && Math.abs(e.cy - p.cy) < 30)) want.add("heavy");
     }
     return want;
   }
@@ -424,7 +424,7 @@ function makeScriptedInput(scriptName) {
     if (adx > 26) want.add(dx > 0 ? "right" : "left");
     else if (adx < 12 && p.hp < p.maxHp * 0.45) want.add(dx > 0 ? "left" : "right");
 
-    if (adx < 36 && Math.abs(near.cy - p.cy) < 34) want.add("attack");
+    if (adx < 36 && Math.abs(near.cy - p.cy) < 34) want.add("heavy");
     if (near.type === "bat" && near.cy < p.cy - 14) want.add("jump");
 
     // 被两只以上贴身，或血少且有敌人靠近时，用冲刺脱身（无敌帧）

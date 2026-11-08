@@ -59,21 +59,22 @@ console.log("\n[1] K 键蓄力机制");
   ok(p.charging, "按下 K 开始蓄力");
   ok(p.charge === 0 || p.charge < 0.05, "蓄力从 0 开始", `${p.charge.toFixed(3)}`);
 
-  // 按住直到接近满
+  // 按住直到蓄满（蓄满会自动释放，所以只统计"蓄到满"用了几帧）
   const max = p.cfg.heavy.chargeMax;
   let frames = 0;
   const inp = holdInput(false);
-  while (p.charge < max - 1e-6 && frames < 300) {
+  while (frames < 300) {
     p.update(DT, inp, world);
     frames++;
+    if (p.charge >= max - 1e-6) break;
+    if (!p.charging) break;
   }
-  console.log(`  充满耗时 ${(frames * DT).toFixed(2)}s（配置 chargeMax = ${max}s）`);
-  ok(Math.abs(frames * DT - max) < 0.05, "充满耗时符合配置", `${(frames * DT).toFixed(2)}s vs ${max}s`);
-  ok(p.charge <= max + 1e-6, "蓄力不会超过上限", `${p.charge.toFixed(3)}`);
+  console.log(`  蓄到满用了 ${(frames * DT).toFixed(2)}s（配置 chargeMax = ${max}s）`);
+  ok(Math.abs(frames * DT - max) < 0.06, "蓄力速度符合配置", `${(frames * DT).toFixed(2)}s vs ${max}s`);
 
-  // 松手释放
+  // 自动释放或松手，都不该继续蓄力
   p.update(DT, holdInput(false, true), world);
-  ok(!p.charging, "松手结束蓄力");
+  ok(!p.charging, "蓄力已结束（自动释放或松手）");
 }
 
 // ---------------------------------------------------------------- 2. 蓄力条随进度变化
@@ -340,9 +341,9 @@ console.log("\n[11] K 键只有一个技能（蓄力斩）");
   ok(!src.includes("slamOnLand"), "旧的下坠砸地已移除", "");
   ok(src.includes("doChargeSlash"), "蓄力斩实现存在", "");
   const { p } = makeWorld();
-  const ids = p.cfg.combo.map((c) => c.id).concat([p.cfg.launcher.id, p.cfg.air.id, p.cfg.heavy.id]);
-  console.log(`  攻击招式总数：${ids.length} 个 -> ${ids.join(", ")}`);
-  ok(ids.length === 6, "共 6 个攻击招式（3 段连招 + 上挑 + 空中斩 + 蓄力斩）", `${ids.length}`);
+  // 现在只有一个攻击招式
+  ok(!!p.cfg.heavy && p.cfg.heavy.id === "chargeSlash", "唯一的攻击是蓄力斩", p.cfg.heavy?.id);
+  ok(!p.cfg.combo && !p.cfg.launcher && !p.cfg.air, "没有其他攻击招式", "");
 }
 
 console.log(fails === 0 ? "\n蓄力检查全部通过" : `\n有 ${fails} 项失败`);

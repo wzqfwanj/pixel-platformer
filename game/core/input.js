@@ -6,7 +6,6 @@ const MAP = {
   up: ["ArrowUp", "KeyW"],
   down: ["ArrowDown", "KeyS"],
   jump: ["Space", "KeyW", "ArrowUp"],
-  attack: ["KeyJ", "KeyX"],
   heavy: ["KeyK", "KeyC"],
   dash: ["ShiftLeft", "ShiftRight", "KeyL"],
   restart: ["KeyR"],

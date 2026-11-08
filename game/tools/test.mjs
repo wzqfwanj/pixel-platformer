@@ -102,22 +102,20 @@ world.player = player;
   ok(player.onGround, "能落回地面");
 }
 
-// ---- 4. 三段连招打木桩
+// ---- 4. 蓄力斩能打中（唯一的攻击方式）
 {
   const dummy = new Enemy("dummy", player.cx + 18, player.feet);
+  dummy.update = () => {};
   world.enemies = [dummy];
-  const input = new FakeInput();
   const hp0 = dummy.hp;
-  let comboTriggers = 0;
-  for (let i = 0; i < 120; i++) {
-    if (i % 14 === 0 && i < 45) { input.press("attack"); }
-    player.update(1 / 60, input, world);
-    for (const e of world.enemies) e.update(1 / 60, world);
-    input.endFrame();
-    if (dummy.hp > 0 && world.hits > 0) comboTriggers = world.hits;
-  }
-  ok(dummy.hp < hp0, "攻击能打中", `hp ${hp0} -> ${dummy.hp}`);
-  ok(world.hits >= 2, "连招能连上", `命中次数=${world.hits}`);
+  const input = new FakeInput();
+  const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+  // 按住 K 蓄满（会自动释放）
+  input.press("heavy");
+  for (let i2 = 0; i2 < 60; i2++) { player.update(1 / 60, input, world); input.endFrame(); }
+  input.release("heavy");
+  for (let i2 = 0; i2 < 90; i2++) { player.update(1 / 60, idle, world); }
+  ok(dummy.hp < hp0, "蓄力斩能打中", `hp ${hp0} -> ${dummy.hp}`);
 }
 
 // ---- 5. 蓄力重砸（用干净的角色，避免受前面连招测试的状态影响）
@@ -338,33 +336,7 @@ world.player = player;
   ok(back === 0, "跑动时屏幕位置单调（无左右回退）", `回退 ${back} 次`);
 }
 
-// ---- 11. 连招手感（取消窗口 / 输入缓冲 / 派生 / 朝向锁定）
-{
-  const { execFileSync } = await import("node:child_process");
-  const comboPath = fileURLToPath(new URL("./combo.mjs", import.meta.url));
-  try {
-    const out = execFileSync(process.execPath, [comboPath], { encoding: "utf8" });
-    const gapLine = out.split("\n").find((l) => l.includes("命中间隔")) ?? "";
-    ok(out.includes("全部通过"), "连招手感检查（combo.mjs）", gapLine.trim());
-  } catch (e) {
-    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
-    ok(false, "连招手感检查（combo.mjs）", bad.join(" | ").slice(0, 200));
-  }
-}
 
-// ---- 12. 动画平滑度（缓动曲线 / 连续跑步 / 状态过渡 / 拖尾）
-{
-  const { execFileSync } = await import("node:child_process");
-  const smoothPath = fileURLToPath(new URL("./smooth.mjs", import.meta.url));
-  try {
-    const out = execFileSync(process.execPath, [smoothPath], { encoding: "utf8" });
-    const line = out.split("\n").find((l) => l.includes("起手最后速度")) ?? "";
-    ok(out.includes("全部通过"), "动画平滑度检查（smooth.mjs）", line.trim());
-  } catch (e) {
-    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
-    ok(false, "动画平滑度检查（smooth.mjs）", bad.join(" | ").slice(0, 200));
-  }
-}
 
 // ---- 13. 无尽模式（刷怪 / 难度递增 / 上限 / 长跑稳定性）
 {
@@ -419,6 +391,20 @@ world.player = player;
   } catch (e) {
     const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
     ok(false, "蓄力机制与蓄力条（charge.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
+// ---- 17. 攻击系统（只有 K 蓄力斩）
+{
+  const { execFileSync } = await import("node:child_process");
+  const atkPath = fileURLToPath(new URL("./attack.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [atkPath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("敌人被打中")) ?? "";
+    ok(out.includes("全部通过"), "攻击系统（attack.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "攻击系统（attack.mjs）", bad.join(" | ").slice(0, 200));
   }
 }
 

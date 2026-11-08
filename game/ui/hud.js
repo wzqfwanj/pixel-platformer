@@ -94,7 +94,7 @@ export function drawHud(s, game) {
 
   // ---- 底部操作提示
   if (game.showHint) {
-    const hint = "A D MOVE  SPACE JUMP  J ATTACK  K HEAVY  SHIFT DASH  T THEME  M MODE  R RESTART";
+    const hint = "A D MOVE   SPACE JUMP   HOLD K CHARGE SLASH   SHIFT DASH   T THEME   M MODE";
     s.rect(0, 167, 320, 13, C.panel);
     s.hline(0, 167, 320, C.ink);
     drawText(s, hint, 160, 171, C.dim, { align: "center", shadow: sh });
