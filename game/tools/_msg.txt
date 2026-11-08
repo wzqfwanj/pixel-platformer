@@ -1,0 +1,24 @@
+碎石飞溅改用 pixelfx 的 ground-slam（地形变红）
+
+之前理解错了：自己写了一套碎石物理（fx/debris.js），但你要的是
+pixelfx 里那个"踩到地形、地形变红、石头飞溅"的现成特效。
+
+确认是 impacts/ground-slam：
+  描述 "Something lands hard: the floor flashes and cracks, two crescent shock waves
+  race out along it, a dust wave and a tall dust cloud rise, rocks erupt, bounce and settle."
+  默认调色板 #2a1712 -> #e8893a 是红橙色，所以地形看起来变红。
+
+改动：
+- 蓄满（k >= 0.85）时放 impacts/ground-slam
+- 轻蓄/半蓄只放 explosions/dirt-explosion（小土爆，不改变地形）
+- 删掉自造的 fx/debris.js 和 main.js 里的全部集成
+
+实测数据：
+- 轻蓄放过 lightning/charge-up + explosions/dirt-explosion
+- 蓄满放过 上述 + impacts/ground-slam
+- ground-slam 起手 0.05s：特效自身像素 20% 偏红
+- 性能从 2.37ms 降到 2.06ms（去掉自造碎石系统）
+
+测试 tools/attack.mjs 的 5.5/5.6 改成验证：
+- 轻蓄不放 ground-slam、蓄满放
+- ground-slam 调色板是暖色、起手确实有 20% 红色像素

@@ -14,7 +14,6 @@ import { Level } from "../world/level.js";
 import { Warrior } from "../entities/warrior.js";
 import { Enemy } from "../entities/enemy.js";
 import { FxLayer } from "../fx/fxlayer.js";
-import { DebrisSystem } from "../fx/debris.js";
 
 const fx = new FxLayer();
 await fx.preload();
@@ -26,21 +25,19 @@ const DT = 1 / 60;
 
 function makeWorld() {
   const level = new Level();
-  const debris = new DebrisSystem();
   const world = {
-    level, fx, debris, enemies: [], player: null,
+    level, fx, enemies: [], player: null,
     shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {},
+    spawned: [],   // 记录放过哪些特效，用来检查蓄满用了 ground-slam
   };
+  // 包一层 fx.spawn，把特效 id 记下来
+  const realSpawn = fx.spawn.bind(fx);
+  fx.spawn = (id, x, y, opts) => { world.spawned.push(id); return realSpawn(id, x, y, opts); };
   const p = new Warrior(level.spawn.x, level.spawn.y);
   world.player = p;
   const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
   for (let i = 0; i < 12; i++) p.update(DT, idle, world);
-  // 碎石的物理由 main.js 的循环推进（warrior.update 不管它）。
-  // 测试里要自己调，否则碎石永远停在爆炸瞬间。
-  const tick = (dt = DT) => {
-    debris.update(dt, level);
-  };
-  return { world, p, level, idle, tick, debris };
+  return { world, p, level, idle, tick: () => {} };
 }
 
 const holdHeavy = (press = false, release = false) => ({
@@ -194,52 +191,71 @@ console.log("\n[5] 越靠近爆心伤害越高");
   ok(dNear > dFar, "近处伤害更高（有距离衰减）", `${dNear} vs ${dFar}`);
 }
 
-// ---------------------------------------------------------------- 5.5 碎石飞溅
-console.log("\n[5.5] 碎石只在蓄满时出现");
+// ---------------------------------------------------------------- 5.5 只有蓄满才放 ground-slam
+console.log("\n[5.5] 蓄满才放 ground-slam（地形变红 + 石头飞溅）");
 {
-  const countDebris = (k) => {
-    const { world, p, idle, tick } = makeWorld();
+  // 蓄力到指定比例后引爆，返回这次放过哪些特效
+  const spawnsAt = (k) => {
+    const { world, p, idle } = makeWorld();
     p.startCharge(world);
     const inp = holdHeavy(false);
     const frames = Math.max(2, Math.round((k * p.cfg.heavy.chargeMax) / DT));
     for (let i = 0; i < frames; i++) p.update(DT, inp, world);
     p.update(DT, holdHeavy(false, true), world);
-    for (let i = 0; i < 30; i++) { p.update(DT, idle, world); tick(); }
-    return world.debris.active;
+    for (let i = 0; i < 30; i++) p.update(DT, idle, world);
+    return world.spawned.slice();
   };
 
-  const light = countDebris(0.2);
-  const half = countDebris(0.6);
-  const full = countDebris(1.0);
-  console.log(`  轻蓄 ${light} 块，半蓄 ${half} 块，蓄满 ${full} 块`);
-  ok(light === 0, "轻蓄没有碎石（碎石是满蓄专属）", `${light}`);
-  ok(half === 0, "半蓄也没有碎石", `${half}`);
-  ok(full >= 20, "蓄满才掀起碎石，而且量足够多", `${full} 块`);
+  const light = spawnsAt(0.2);
+  const full = spawnsAt(1.0);
+  console.log("  轻蓄放过: " + light.join(", "));
+  console.log("  蓄满放过: " + full.join(", "));
+
+  ok(light.indexOf("explosions/dirt-explosion") >= 0, "轻蓄有土爆", "");
+  ok(light.indexOf("impacts/ground-slam") < 0, "轻蓄不放 ground-slam", "");
+  ok(full.indexOf("impacts/ground-slam") >= 0, "蓄满放 ground-slam", "");
 }
 
-console.log("\n[5.6] 碎石有独立物理（会飞、会落地）");
+// ---------------------------------------------------------------- 5.6 ground-slam 自带地形变化和飞石
+console.log("\n[5.6] ground-slam 自带地形变红和石头飞溅");
 {
-  const { world, p, idle, tick } = makeWorld();
-  p.startCharge(world);
-  const inp = holdHeavy(false);
-  for (let i = 0; i < 50; i++) p.update(DT, inp, world);
-  p.update(DT, holdHeavy(false, true), world);
-  for (let i = 0; i < 20; i++) { p.update(DT, idle, world); tick(); }
+  const mod = await import("../../pixelfx/src/fx/impacts/ground-slam.js");
+  const meta = mod.meta;
+  console.log("  name: " + meta.name);
+  console.log("  size: " + JSON.stringify(meta.size) + "  dur: " + meta.duration);
 
-  const d = world.debris;
-  const chunks = d.pool.filter((c) => c.active);
-  const flying = chunks.filter((c) => c.vy < 0);
-  console.log(`  爆炸瞬间：${chunks.length} 块，其中 ${flying.length} 块在上升`);
-  ok(flying.length > 3, "碎石被炸得往上飞", `${flying.length} 块`);
+  const pal = (meta.options && meta.options.palette) || [];
+  const warm = pal.slice(1, 4).every((h) => {
+    const r = parseInt(h.slice(1, 3), 16), g = parseInt(h.slice(3, 5), 16), b = parseInt(h.slice(5, 7), 16);
+    return r > b;
+  });
+  console.log("  调色板: " + pal.slice(0, 4).join(" ") + " -> " + (warm ? "暖色" : "冷色"));
+  ok(warm, "调色板是红橙色系（地形看起来变红）", "");
+  ok(meta.size[0] >= 200, "尺寸够大，能盖住一片地面", JSON.stringify(meta.size));
 
-  // 等 1 秒，应该都落下来了
-  for (let i = 0; i < 60; i++) { p.update(DT, idle, world); tick(); }
-  const later = d.pool.filter((c) => c.active);
-  const stillUp = later.filter((c) => c.vy < -20);
-  console.log(`  1 秒后：还剩 ${later.length} 块，其中 ${stillUp.length} 块还在上升`);
-  ok(stillUp.length === 0, "1 秒后都落下来了（有重力）", `${stillUp.length} 块仍上升`);
-  ok(later.length <= chunks.length, "碎石会逐渐消失", `${chunks.length} -> ${later.length}`);
+  // 渲染起手一帧，确认大量红色像素
+  const { createFrame, clearFrame, createFx } = await import("../../pixelfx/src/core/fx.js");
+  const w = meta.size[0], h = meta.size[1];
+  const frame = createFrame(w, h);
+  const fxo = createFx(mod, { x: meta.origin[0], y: meta.origin[1], seed: 7 });
+  fxo.update(0.05);
+  clearFrame(frame);
+  fxo.draw(frame, "back");
+  fxo.draw(frame, "front");
+
+  let red = 0, total = 0;
+  for (let i = 0; i < frame.color.length; i++) {
+    const c = frame.color[i];
+    if (!c) continue;
+    total++;
+    const r = c & 255, g = (c >>> 8) & 255, b = (c >>> 16) & 255;
+    if (r > g * 1.25 && r > b * 1.25) red++;
+  }
+  const pct = total ? red / total * 100 : 0;
+  console.log("  起手 0.05s：不透明 " + total + " px，偏红 " + red + " (" + pct.toFixed(0) + "%)");
+  ok(pct > 10, "起手瞬间地形明显变红", pct.toFixed(0) + "%");
 }
+
 
 
 // ---------------------------------------------------------------- 6. 轻点 vs 蓄满

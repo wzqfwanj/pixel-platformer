@@ -1,4 +1,3 @@
-// 蓄力爆炸实测：不同蓄力档位，爆炸瞬间和碎石飞散的样子。
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import { Surface, blitRect } from "../core/screen.js";
@@ -7,7 +6,6 @@ import { Level } from "../world/level.js";
 import { Warrior } from "../entities/warrior.js";
 import { Enemy } from "../entities/enemy.js";
 import { FxLayer } from "../fx/fxlayer.js";
-import { DebrisSystem } from "../fx/debris.js";
 import { bakeSky, bakeHills, PARALLAX_W } from "../world/background.js";
 import { placeCamera, renderCamera } from "../world/camera.js";
 import { drawText } from "../core/text.js";
@@ -20,10 +18,9 @@ const level = new Level();
 const baked = level.bake();
 const sky = bakeSky(W, H);
 const hills = bakeHills(PARALLAX_W, H);
-let debris = new DebrisSystem();
 
 const world = {
-  level, fx, debris, enemies: [], player: null,
+  level, fx, enemies: [], player: null,
   shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {},
 };
 const p = new Warrior(level.spawn.x, level.spawn.y);
@@ -34,7 +31,7 @@ const cam = placeCamera({ x: 0, y: 0 }, p, level);
 setTheme("dark");
 
 const shots = [];
-function snap(label) {
+function snap(label, highlight) {
   const buf = new Surface(W, H);
   buf.clearLight();
   const rc = renderCamera(cam, 0);
@@ -45,64 +42,38 @@ function snap(label) {
   fx.drawBack(buf, rc);
   for (const e of world.enemies) if (!e.dead) e.draw(buf, rc);
   p.draw(buf, rc);
-  debris.draw(buf, rc);
   fx.drawFront(buf, rc);
   drawText(buf, label, 4, 4, hex("#ffffff"), { shadow: hex("#000000") });
-  shots.push(buf);
+  shots.push({ buf, label, highlight });
 }
 
-function placeTargets() {
-  world.enemies = [24, -24, 40].map((dx) => {
-    const e = new Enemy("slime", p.cx + dx, p.feet);
-    e.update = () => {};
-    return e;
-  });
+world.enemies = [26, -26, 42].map((dx) => {
+  const e = new Enemy("slime", p.cx + dx, p.feet);
+  e.update = () => {};
+  return e;
+});
+
+// 蓄满
+const holdIn = { down: new Set(["heavy"]), just: new Set(["heavy"]), held: (a) => a === "heavy", pressed: (a) => a === "heavy", letGo: () => false, axis: () => 0 };
+p.update(1 / 60, holdIn, world);
+holdIn.just.clear();
+holdIn.pressed = () => false;
+for (let i = 0; i < 50; i++) p.update(1 / 60, holdIn, world);
+snap("蓄满，按住 K");
+
+const relIn = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: (a) => a === "heavy", axis: () => 0 };
+p.update(1 / 60, relIn, world);
+let guard = 0;
+while (p.slash && p.slash.phase === "windup" && guard++ < 30) p.update(1 / 60, idle, world);
+
+// 爆炸后不同时刻
+for (const [frames, label] of [[2, "爆炸 +0.03s 地形闪红"], [6, "爆炸 +0.1s"], [14, "爆炸 +0.23s 石头飞起"], [30, "爆炸 +0.5s"]]) {
+  for (let i = 0; i < frames; i++) { p.update(1 / 60, idle, world); fx.update(1 / 60, cam); }
+  snap(label);
 }
 
-for (const [holdFrames, name] of [[6, "轻蓄"], [26, "半蓄"], [50, "蓄满"]]) {
-  // 重置
-  p.x = level.spawn.x - p.w / 2;
-  p.y = level.spawn.y - p.h;
-  p.facing = 1;
-  p.state = "idle";
-  p.charging = false;
-  p.slash = null;
-  p.charge = 0;
-  p.vy = 0; p.vx = 0;
-  debris.clear();
-  fx.live.length = 0;
-  placeTargets();
-
-  const holdIn = {
-    down: new Set(["heavy"]), just: new Set(["heavy"]),
-    held: (a) => a === "heavy", pressed: (a) => a === "heavy",
-    letGo: () => false, axis: () => 0,
-  };
-  p.update(1 / 60, holdIn, world);
-  holdIn.just.clear();
-  holdIn.pressed = () => false;
-  for (let i = 0; i < holdFrames; i++) p.update(1 / 60, holdIn, world);
-
-  const relIn = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: (a) => a === "heavy", axis: () => 0 };
-  p.update(1 / 60, relIn, world);
-  // 推进到爆炸瞬间
-  let guard = 0;
-  while (p.slash && p.slash.phase === "windup" && guard++ < 30) p.update(1 / 60, idle, world);
-  p.update(1 / 60, idle, world);
-  debris.update(1 / 60, level);
-  snap(`${name} 爆炸瞬间`);
-
-  // 碎石飞散中
-  for (let i = 0; i < 10; i++) { p.update(1 / 60, idle, world); debris.update(1 / 60, level); fx.update(1 / 60, cam); }
-  snap(`${name} 碎石飞散`);
-
-  // 落地
-  for (let i = 0; i < 30; i++) { p.update(1 / 60, idle, world); debris.update(1 / 60, level); fx.update(1 / 60, cam); }
-  snap(`${name} 落地`);
-}
-
-// 拼图
-const cols = 3;
+// 拼图 2 列
+const cols = 2;
 const rows = Math.ceil(shots.length / cols);
 const PAD = 4;
 const OW = cols * (W + PAD) + PAD;
@@ -114,7 +85,7 @@ shots.forEach((sh, i) => {
   const cy = PAD + Math.floor(i / cols) * (H + PAD);
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const c = sh.color[y * W + x];
+      const c = sh.buf.color[y * W + x];
       if (c) out.px(cx + x, cy + y, c);
     }
 });
@@ -147,6 +118,6 @@ function encodePNG(w, h, d) {
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
 }
-writeFileSync("preview-blast.png", encodePNG(pw, ph, rgba));
-console.log(`已写出 preview-blast.png（${pw}x${ph}，${shots.length} 格）`);
-console.log("布局：行 = 轻蓄/半蓄/蓄满，列 = 爆炸瞬间 / 碎石飞散 / 落地");
+writeFileSync("preview-slam.png", encodePNG(pw, ph, rgba));
+console.log("已写出 preview-slam.png（" + pw + "x" + ph + "，" + shots.length + " 格）");
+shots.forEach((s, i) => console.log("  " + (i + 1) + ". " + s.label));

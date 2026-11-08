@@ -49,12 +49,12 @@ export const CFG = {
     recover: 0.28,          // 收招
     shake: 6,
     hitstop: 0.08,
-    // 特效：爆点本体 + 地面冲击
+    // 特效：
+    //   轻蓄 = 土爆（范围小，不改变地形）
+    //   蓄满 = ground-slam（地面闪红开裂 + 石头喷出弹跳落定 + 两道冲击波）
     fx: "explosions/dirt-explosion",
-    fxFull: "impacts/ground-slam",     // 蓄满时追加更大的一圈
-    // 碎石：蓄力越足越多
-    debrisBase: 5,
-    debrisPerCharge: 22,    // 蓄满 27 块
+    fxFull: "impacts/ground-slam",
+    fxFullMin: 0.85,        // 到这个蓄力比例才用 ground-slam
   },
 };
 
@@ -164,23 +164,13 @@ export class Warrior {
       palette: WARRIOR_PALETTE,
       seed: Math.random() * 100,
     });
+    // 蓄满：换成 ground-slam —— 地面闪红开裂、石头喷出弹跳、两道冲击波沿地面推开。
+    // 这个特效本身就包含"地形变红 + 碎石飞溅"，不需要另做一套。
     if (full) {
-      // 蓄满追加一圈更大的冲击波
-      world.fx.spawn(H.fxFull, cx, cy, {
-        palette: WARRIOR_PALETTE,
-        seed: Math.random() * 100,
-      });
-      world.fx.spawn("impacts/crit-hit", cx, cy - 8, { seed: Math.random() * 100 });
+      world.fx.spawn(H.fxFull, cx, cy, { seed: Math.random() * 100 });
     }
     world.shake(H.shake + k * 5);
     world.hitLag(H.hitstop + k * 0.04);
-
-    // ---- 碎石飞溅：只有蓄满才掀石头。
-    // 碎石是"满蓄"的专属奖励，也是玩家判断"该松手了"的最直观信号。
-    if (full) {
-      const count = Math.round(H.debrisBase + H.debrisPerCharge * k);
-      world.debris?.burst(cx, cy, count, k);
-    }
 
     // ---- 范围伤害：圆内所有敌人
     let hitCount = 0;
