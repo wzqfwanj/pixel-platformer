@@ -2,6 +2,7 @@
 // 用法: node tools/test.mjs [--png]
 
 import { writeFileSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Level, TILE } from "../world/level.js";
 import { Warrior } from "../entities/warrior.js";
 import { Enemy } from "../entities/enemy.js";
@@ -314,6 +315,34 @@ world.player = player;
     if (centres[i].c < centres[i - 1].c) back++;
   }
   ok(back === 0, "跑动时屏幕位置单调（无左右回退）", `回退 ${back} 次`);
+}
+
+// ---- 11. 连招手感（取消窗口 / 输入缓冲 / 派生 / 朝向锁定）
+{
+  const { execFileSync } = await import("node:child_process");
+  const comboPath = fileURLToPath(new URL("./combo.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [comboPath], { encoding: "utf8" });
+    const gapLine = out.split("\n").find((l) => l.includes("命中间隔")) ?? "";
+    ok(out.includes("全部通过"), "连招手感检查（combo.mjs）", gapLine.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "连招手感检查（combo.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
+// ---- 12. 动画平滑度（缓动曲线 / 连续跑步 / 状态过渡 / 拖尾）
+{
+  const { execFileSync } = await import("node:child_process");
+  const smoothPath = fileURLToPath(new URL("./smooth.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [smoothPath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("起手最后速度")) ?? "";
+    ok(out.includes("全部通过"), "动画平滑度检查（smooth.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "动画平滑度检查（smooth.mjs）", bad.join(" | ").slice(0, 200));
+  }
 }
 
 console.log(fails ? `\n${fails} 项失败` : "\n全部通过");

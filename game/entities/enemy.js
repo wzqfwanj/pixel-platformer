@@ -75,6 +75,8 @@ export class Enemy {
     this.hp = d.hp;
     this.maxHp = d.hp;
     this.flash = 0;
+    this.shakeT = 0;    // 被打时的高频抖动（木桩用）
+    this.shakeAmp = 0;
     this.hitStun = 0;
     this.dead = false;
     this.deadT = 0;
@@ -89,15 +91,34 @@ export class Enemy {
   get cx() { return this.x + this.w / 2; }
   get cy() { return this.y + this.h / 2; }
 
-  takeDamage(dmg, fromX, world, crit = false) {
+  /**
+   * 受伤。opts: { kb 水平击退, lift 竖直（负数=浮空）, stun 僵直秒数 }
+   * 命中反馈的强度由招式决定，敌人只负责照着演。
+   */
+  takeDamage(dmg, fromX, world, crit = false, opts = {}) {
     if (this.dead) return;
     this.hp -= dmg;
     this.flash = 0.09;
-    this.hitStun = 0.16;
+    this.hitStun = opts.stun ?? 0.16;
+
     const dir = Math.sign(this.cx - fromX) || 1;
-    this.vx = dir * (this.type === "dummy" ? 26 : 90);
+    const kb = opts.kb ?? (this.type === "dummy" ? 26 : 90);
+    // 木桩钉在原地（练连招用），但要有"被打到"的反应：抖动 + 前倾
+    if (this.type === "dummy") {
+      this.vx = dir * Math.min(kb, 30) * 0.35;
+      this.shakeT = 0.12;
+      this.shakeAmp = Math.min(3, kb / 40);
+    } else {
+      this.vx = dir * kb;
+      if (opts.lift) this.vy = opts.lift;
+    }
+
     world.fx.spawn("impacts/hit-spark", this.cx + dir * 4, this.cy, { flip: dir < 0, seed: this.cx });
     world.fx.spawn("ui/damage-number", this.cx, this.y - 4, { number: dmg, crit });
+
+    // 连段递增：第 2、3 下火花更大
+    if (crit) world.fx.spawn("impacts/crit-hit", this.cx, this.cy, { seed: this.cx });
+
     if (this.hp <= 0) {
       this.dead = true;
       this.deadT = 0;
@@ -110,6 +131,7 @@ export class Enemy {
   update(dt, world) {
     this.t += dt;
     this.flash = Math.max(0, this.flash - dt);
+    this.shakeT = Math.max(0, this.shakeT - dt);
     this.hitStun = Math.max(0, this.hitStun - dt);
     this.contactCd = Math.max(0, this.contactCd - dt);
     if (this.dead) {

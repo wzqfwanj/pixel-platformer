@@ -113,8 +113,27 @@ if (sCx.flips > 2) { console.log(`  ✗ 角色屏幕中心 X 反向 ${sCx.flips}
 else console.log("  ✓ 角色屏幕 X 单调（死区跟随起作用）");
 if (sFeet.flips > 0) { console.log(`  ✗ 脚底屏幕 Y 有反向 ${sFeet.flips} 次 —— 竖直抖动`); bad++; }
 else console.log("  ✓ 脚底屏幕 Y 无反向");
-if (widths.length > 3) { console.log(`  ✗ 包围盒宽度变化太多：${JSON.stringify(widths)}（可能有残影）`); bad++; }
-if (bboxW.flips > 2 || bboxH.flips > 4) { console.log(`  ✗ 包围盒尺寸在跳（宽反向 ${bboxW.flips} / 高变化 ${JSON.stringify(bboxH.counts)}）`); bad++; }
+// 连续腿动会让包围盒宽度变化，这本身正常（两条腿同一帧各动 1px 时宽度会变 2）。
+// 真正的判据是"每一条轮廓边每帧最多动 1 像素"，那才是眼睛看到的平滑度。
+// 只比较原序列里真正相邻的帧（过滤后的 use 会跨越中间的 idle/fall 帧）
+const edgeJump = (pick) => {
+  let m = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1], b = rows[i];
+    if (a.state !== "run" || b.state !== "run" || !a.bbox || !b.bbox) continue;
+    m = Math.max(m, Math.abs(pick(b) - pick(a)));
+  }
+  return m;
+};
+const jumpL = edgeJump((r) => r.bbox.minX), jumpR = edgeJump((r) => r.bbox.maxX);
+console.log(`  宽度取值 ${JSON.stringify(widths)}；左边缘单帧最大移动 ${jumpL}px，右边缘 ${jumpR}px`);
+if (jumpL > 1 || jumpR > 1) {
+  console.log(`  ✗ 轮廓边缘单帧跳变超过 1px（左 ${jumpL} / 右 ${jumpR}）`);
+  bad++;
+} else {
+  console.log("  ✓ 轮廓逐帧平滑（每条边每帧最多动 1px，腿连续摆动）");
+}
+if (bboxH.flips > 4) { console.log(`  ✗ 包围盒高度在跳 ${JSON.stringify(bboxH.counts)}`); bad++; }
 
 console.log("\n前 16 帧明细（包围盒 = 角色自身在画布上的像素范围）：");
 console.log("   i  state  bbox(x,y,w,h)  count  屏幕脚Y  屏幕中心X");

@@ -53,9 +53,12 @@ export function drawHud(s, game) {
   drawText(s, `COIN ${game.coins}/${game.coinTotal}`, 316, 6, C.accent, { align: "right", shadow: sh });
   drawText(s, `${game.enemiesKilled} KILL`, 316, 14, C.dim, { align: "right", shadow: sh });
 
-  // ---- 连击
+  // ---- 连击：当前连击大字，峰值小字
   if (game.combo >= 2) {
-    drawText(s, `x${game.combo} COMBO`, 12, 22, C.text, { font: "big", shadow: sh });
+    drawText(s, `x${game.combo}`, 12, 22, C.accent, { font: "big", scale: 2, shadow: sh });
+    drawText(s, "COMBO", 12 + 24, 26, C.text, { shadow: sh });
+  } else if (game.comboBest >= 3) {
+    drawText(s, `BEST x${game.comboBest}`, 12, 23, C.dim, { shadow: sh });
   }
 
   // ---- 底部操作提示

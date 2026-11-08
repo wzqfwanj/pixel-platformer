@@ -54,6 +54,7 @@ const game = {
   coinTotal: 0,
   enemiesKilled: 0,
   combo: 0,
+  comboBest: 0,
   comboTimer: 0,
   won: false,
   debug: false,
@@ -63,12 +64,27 @@ const game = {
 // ---------------- world 接口（实体里回调这些）
 game.shake = (a) => { game.shakeAmt = Math.max(game.shakeAmt, a); };
 game.hitLag = (t) => { game.hitLagT = Math.max(game.hitLagT, t); };
-game.onHit = (n) => {
+game.onHit = (n, move) => {
   game.combo += n;
-  game.comboTimer = 1.6;
-  if (game.combo >= 3 && game.combo % 3 === 0) {
-    game.fx.spawn("ui/combo-counter", game.player.cx, game.player.y - 16, {
-      count: game.combo, palette: WARRIOR_PALETTE, seed: Math.random() * 100,
+  game.comboTimer = 1.8;
+  game.comboBest = Math.max(game.comboBest ?? 0, game.combo);
+
+  // 连段越多，画面反馈越强
+  const c = game.combo;
+  const p = game.player;
+  if (c >= 2) {
+    // 每一段都来一点"顿挫"：小抖
+    game.shake(0.8 + Math.min(2.5, c * 0.25));
+  }
+  if (c % 3 === 0) {
+    game.fx.spawn("ui/combo-counter", p.cx, p.y - 16, {
+      count: c, palette: WARRIOR_PALETTE, seed: Math.random() * 100,
+    });
+  }
+  // 重击（第 3 段）额外加特写式特效
+  if (move && move.crit) {
+    game.fx.spawn("impacts/crit-hit", p.cx + p.facing * 20, p.cy, {
+      flip: p.facing < 0, seed: Math.random() * 100,
     });
   }
 };
@@ -123,6 +139,7 @@ function reset() {
   game.coinTotal = game.level.coins.length;
   game.enemiesKilled = 0;
   game.combo = 0;
+  game.comboBest = 0;
   game.comboTimer = 0;
   game.won = false;
   game.shakeAmt = 0;

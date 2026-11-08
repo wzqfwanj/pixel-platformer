@@ -20,6 +20,8 @@ const C = {
   bladeD: hex("#8f9dc0"),
   hilt: hex("#6a4426"),
   white: hex("#ffffff"),
+  bladeGlow: hex("#ffffff"),
+  bladeTrail: hex("#9fd8ff"),
 };
 
 export const WARRIOR_W = 26;
@@ -55,8 +57,10 @@ export function drawWarrior(s, x, y, facing, pose) {
     }
   };
 
-  const bob = pose.bob ?? 0;
-  const lean = pose.lean ?? 0;
+  // 姿态里全是浮点，取整只在真正落笔时做一次，避免每层各舍一次造成抖动
+  const bob = Math.round(pose.bob ?? 0);
+  const lean = Math.round(pose.lean ?? 0);
+  const stretch = pose.stretch ?? 1;
   const CX = 10;          // 身体中心
   const legs = pose.legs ?? "stand";
 
@@ -80,16 +84,23 @@ export function drawWarrior(s, x, y, facing, pose) {
     rect(CX - 5, 22, 11, 2, C.steelD);
     rect(CX - 6, 24, 13, 2, C.ink);
   } else if (legs === "run") {
-    const ph = (pose.phase ?? 0) % 4;
-    const swing = [-3, 0, 3, 0][ph];
-    const lift = [0, 1, 0, 1][ph];
-    // 后腿
-    const bx = CX - 2 + Math.min(0, swing);
-    rect(bx, legY + lift, 3, 6 - lift, C.steelD);
+    // 连续相位：sin 曲线驱动，60fps 下每一帧都在动，不会"跳步"
+    const ph = pose.phase ?? 0;                 // 0..4 浮点
+    const a = (ph / 4) * Math.PI * 2;
+    const swing = Math.sin(a) * 3.2;            // -3.2..3.2
+    const lift = Math.max(0, Math.sin(a * 2)) * 1.3;
+
+    // 后腿（相位相反）
+    const bSwing = -swing;
+    const bx = Math.round(CX - 2 + Math.min(0, bSwing));
+    const bl = Math.round(lift * Math.max(0, Math.sin(a * 2 + Math.PI)));
+    rect(bx, legY + bl, 3, 6 - bl, C.steelD);
     rect(bx - 1, legY + 6, 4, 2, C.ink);
+
     // 前腿
-    const fx = CX + 1 + Math.max(0, swing);
-    rect(fx, legY, 3, 6, C.steel);
+    const fx = Math.round(CX + 1 + Math.max(0, swing));
+    const fl = Math.round(Math.max(0, Math.sin(a * 2)) * 1.3);
+    rect(fx, legY + fl, 3, 6 - fl, C.steel);
     rect(fx - 1, legY + 6, 4, 2, C.ink);
   } else if (legs === "jump" || legs === "fall") {
     const up = legs === "jump" ? 1 : 0;
@@ -104,8 +115,9 @@ export function drawWarrior(s, x, y, facing, pose) {
     rect(CX, legY + 6, 4, 2, C.ink);
   }
 
-  // ---------- 躯干
-  const ty = 10 + bob, tx = CX - 4 + lean;
+  // ---------- 躯干（stretch > 1 时略微拉长，< 1 时压扁）
+  const stretchOff = Math.round((stretch - 1) * 8);   // -1..1 左右
+  const ty = 10 + bob - (stretchOff > 0 ? 0 : -stretchOff), tx = CX - 4 + lean;
   rect(tx, ty, 8, 8, C.steel);
   rect(tx, ty, 8, 1, C.steelL);
   rect(tx, ty, 1, 8, C.steelD);
@@ -126,7 +138,7 @@ export function drawWarrior(s, x, y, facing, pose) {
   put(tx + 8, ty + 2, C.ink);
 
   // ---------- 头 / 头盔
-  const hy = 2 + bob, hx = CX - 3 + lean;
+  const hy = 2 + bob - Math.max(0, stretchOff), hx = CX - 3 + lean;
   rect(hx, hy, 6, 7, C.steel);
   rect(hx, hy, 6, 1, C.steelL);
   rect(hx, hy, 1, 7, C.steelD);
@@ -151,6 +163,27 @@ export function drawWarrior(s, x, y, facing, pose) {
   // ---------- 后臂
   rect(tx - 2, ty + 2, 2, 5, C.steelD);
   put(tx - 1, ty + 6, C.skinD);
+
+  // ---------- 刀光拖尾
+  // 攻击判定期间，每帧把剑的角度记进 pose.trail。这里把历史角度逐层画成残影，
+  // 越旧越淡、越短，视觉上连成一道弧 —— 像素游戏里"挥砍流畅"最关键的一招。
+  if (pose.trail && pose.trail.length > 1) {
+    const shX0 = tx + 8, shY0 = ty + 3;
+    for (let gi = pose.trail.length - 1; gi >= 1; gi--) {
+      const a = pose.trail[gi];
+      const fade = 1 - gi / (pose.trail.length + 0.5);   // 0.5..0.9
+      const hx0 = shX0 + Math.round(Math.cos(a) * 3);
+      const hy0 = shY0 + Math.round(Math.sin(a) * 3);
+      // 残影只画剑身中段到剑尖，越旧越短
+      const len = 8 - gi * 1.2;
+      for (let d = 3; d <= len; d += 1) {
+        const px = hx0 + Math.round(Math.cos(a) * d);
+        const py = hy0 + Math.round(Math.sin(a) * d);
+        const sx = flip ? x + WARRIOR_W - 1 - px : x + px;
+        s.blendPx(sx, y + py, gi === 1 ? C.bladeGlow : C.bladeTrail, fade * 0.55);
+      }
+    }
+  }
 
   // ---------- 前臂 + 剑
   const ang = pose.sword ?? Math.PI / 2.2;

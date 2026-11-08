@@ -32,4 +32,33 @@ export const hash2 = (x, y, s = 0) => {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
 
+// ---------------- 缓动 ----------------
+// 手感全靠这几个曲线：出刀用 easeOutCubic（爆发式开始、末端减速）才有"啪"的脆感；
+// 收招用 easeOutQuad 慢慢回位。全部 linear 的话动作会很机械。
+
+export const easeInQuad = (t) => t * t;
+export const easeOutQuad = (t) => 1 - (1 - t) * (1 - t);
+export const easeInOutQuad = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+export const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+export const easeInCubic = (t) => t * t * t;
+export const easeOutExpo = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+export const smoothstep = (t) => t * t * (3 - 2 * t);
+
+/**
+ * 指数平滑：帧率无关的"朝目标靠拢"。
+ * tau 是时间常数（秒），越小越跟手。用它做姿态混合，状态切换就不会硬切。
+ */
+export const damp = (current, target, tau, dt) => {
+  if (tau <= 0) return target;
+  return target + (current - target) * Math.exp(-dt / tau);
+};
+
+/** 角度平滑：沿最短弧走，避免 2π 跳变导致手臂突然绕一圈 */
+export const dampAngle = (current, target, tau, dt) => {
+  let d = target - current;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return current + d * (1 - Math.exp(-dt / tau));
+};
+
 export const aabb = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
