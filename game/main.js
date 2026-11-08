@@ -518,11 +518,13 @@ async function boot() {
     };
     info.textContent = `headless: ${hf} 帧，特效 ${game.fx.count}, 玩家 ${p.state}`;
     document.title = "S " + JSON.stringify({ script, px: meta.px, py: meta.py, state: p.state, coins: game.coins });
-    fetch("/__shot", { method: "POST", body: canvas.toDataURL("image/png") })
+    // 上传路径按页面位置算，兼容"挂在子路径下"的部署（/pixel/...）
+    const postBase = new URL("../", location.href);
+    fetch(new URL("__shot", postBase), { method: "POST", body: canvas.toDataURL("image/png") })
       .then((r) => r.text()).then((t) => console.log("shot: " + t)).catch((e) => console.log("shot 失败：" + e.message));
     document.documentElement.dataset.shot = canvas.toDataURL("image/png");
     document.documentElement.dataset.meta = JSON.stringify(meta);
-    fetch("/__meta", { method: "POST", body: JSON.stringify(meta) })
+    fetch(new URL("__meta", postBase), { method: "POST", body: JSON.stringify(meta) })
       .then((r) => r.text()).then((t) => console.log("meta: " + t)).catch((e) => console.log("meta 失败：" + e.message));
     return;
   }

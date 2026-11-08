@@ -362,5 +362,19 @@ world.player = player;
   }
 }
 
+// ---- 14. 小地图（位置 / 剖面完整 / 断口对应 / 标记 / 主题）
+{
+  const { execFileSync } = await import("node:child_process");
+  const mmPath = fileURLToPath(new URL("./minimap.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [mmPath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("内部") && l.includes("列")) ?? "";
+    ok(out.includes("全部通过"), "小地图检查（minimap.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "小地图检查（minimap.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
 console.log(fails ? `\n${fails} 项失败` : "\n全部通过");
 process.exit(fails ? 1 : 0);

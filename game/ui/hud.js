@@ -4,6 +4,7 @@
 import { hex } from "../core/util.js";
 import { drawText } from "../core/text.js";
 import { getTheme } from "../core/theme.js";
+import { drawMinimap } from "./minimap.js";
 
 /** 把主题里的 #rrggbb 转成缓冲区用的颜色整数，顺手缓存（主题切换时重建） */
 let cache = { name: null, colors: null };
@@ -123,4 +124,7 @@ export function drawHud(s, game) {
     s.rect(0, 74, 320, 26, C.panel);
     drawText(s, "YOU DIED", 160, 80, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
   }
+
+  // ---- 右上角小地图（结算画面时隐藏，免得挡字）
+  if (!game.won) drawMinimap(s, game, C);
 }

@@ -18,6 +18,7 @@ const argOf = (k, d) => {
 const FRAMES = argOf("--frames", "300");
 const SCRIPT = argOf("--script", "combat");
 const MODE = argOf("--mode", "level");
+const THEME = argOf("--theme", "dark");
 const PORT = Number(argOf("--port", "8123"));
 const SHOT = join(GAME, "preview.png");
 
@@ -39,7 +40,7 @@ await new Promise((r) => setTimeout(r, 600));
 
 const profile = join(HERE, ".shot-profile-" + Date.now());
 mkdirSync(profile, { recursive: true });
-const url = `http://127.0.0.1:${PORT}/game/index.html?frames=${FRAMES}&script=${SCRIPT}&mode=${MODE}`;
+const url = `http://127.0.0.1:${PORT}/game/index.html?frames=${FRAMES}&script=${SCRIPT}&mode=${MODE}&theme=${THEME}`;
 const proc = spawn(browser, [
   "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
   `--user-data-dir=${profile}`, "--virtual-time-budget=20000", "--window-size=1000,700",
