@@ -392,6 +392,8 @@ async function boot() {
     document.title = "S " + JSON.stringify({ script, px: meta.px, py: meta.py, state: p.state, coins: game.coins });
     fetch("/__shot", { method: "POST", body: canvas.toDataURL("image/png") })
       .then((r) => r.text()).then((t) => console.log("shot: " + t)).catch((e) => console.log("shot 失败：" + e.message));
+    document.documentElement.dataset.shot = canvas.toDataURL("image/png");
+    document.documentElement.dataset.meta = JSON.stringify(meta);
     fetch("/__meta", { method: "POST", body: JSON.stringify(meta) })
       .then((r) => r.text()).then((t) => console.log("meta: " + t)).catch((e) => console.log("meta 失败：" + e.message));
     return;

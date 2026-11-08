@@ -119,10 +119,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # 用法: python game/server.py [端口] [监听地址]
+    # 默认 0.0.0.0，这样局域网/公网能直接访问（规范要求在线可访问、无密码）。
+    # 想只在本机用就传 127.0.0.1。
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8123
-    host = "127.0.0.1"
+    host = sys.argv[2] if len(sys.argv) > 2 else "0.0.0.0"
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print("http://%s:%d/game/index.html" % (host, port))
+    shown = "127.0.0.1" if host == "0.0.0.0" else host
+    print("本机: http://%s:%d/game/index.html" % (shown, port))
+    if host == "0.0.0.0":
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            print("局域网: http://%s:%d/game/index.html" % (s.getsockname()[0], port))
+            s.close()
+        except OSError:
+            pass
     print("Ctrl+C 停止")
     try:
         httpd.serve_forever()
