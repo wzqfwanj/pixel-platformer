@@ -15,6 +15,8 @@ import { Enemy } from "./entities/enemy.js";
 import { FxLayer, WARRIOR_PALETTE } from "./fx/fxlayer.js";
 import { drawHud } from "./ui/hud.js";
 import { collectCoins } from "./world/pickups.js";
+import { Spawner } from "./world/spawner.js";
+import { buildArena } from "./world/arena.js";
 import { getTheme, setTheme, toggleTheme, applyThemeToPage, themeNames } from "./core/theme.js";
 
 const W = 320, H = 180;
@@ -57,6 +59,11 @@ const game = {
   comboBest: 0,
   comboTimer: 0,
   won: false,
+  mode: "level",     // "level" 关卡模式 | "endless" 无尽模式
+  spawner: null,
+  surviveTime: 0,
+  waveText: "",
+  waveT: 0,
   debug: false,
   showHint: true,
 };
@@ -93,6 +100,8 @@ game.onEnemyKilled = () => {
   game.shake(2.5);
 };
 game.respawnPlayer = () => {
+  // 无尽模式没有复活：死了就是结束，等玩家按 R
+  if (game.mode === "endless") return;
   const p = game.player;
   p.hp = p.maxHp;
   p.state = "idle";
@@ -129,14 +138,33 @@ function initTheme() {
 }
 
 // ---------------- 初始化
-function reset() {
-  game.level = new Level();
-  game.baked = game.level.bake();
-  game.player = new Warrior(game.level.spawn.x, game.level.spawn.y);
-  game.player.safe = { x: game.level.spawn.x, y: game.level.spawn.y };
-  game.enemies = game.level.enemySpawns.map((e) => new Enemy(e.type, e.x, e.y));
-  game.coins = 0;
-  game.coinTotal = game.level.coins.length;
+function reset(mode = game.mode) {
+  game.mode = mode;
+  game.spawner = null;
+  game.surviveTime = 0;
+  game.waveText = "";
+  game.waveT = 0;
+
+  if (mode === "endless") {
+    const arena = buildArena();
+    game.level = new Level(arena.rows);
+    game.baked = game.level.bake();
+    game.player = new Warrior(arena.spawn.x, arena.spawn.y);
+    game.player.safe = { x: arena.spawn.x, y: arena.spawn.y };
+    game.enemies = [];
+    game.coins = 0;
+    game.coinTotal = 0;
+    game.spawner = new Spawner(Math.random);
+    game.showHint = false;
+  } else {
+    game.level = new Level();
+    game.baked = game.level.bake();
+    game.player = new Warrior(game.level.spawn.x, game.level.spawn.y);
+    game.player.safe = { x: game.level.spawn.x, y: game.level.spawn.y };
+    game.enemies = game.level.enemySpawns.map((e) => new Enemy(e.type, e.x, e.y));
+    game.coins = 0;
+    game.coinTotal = game.level.coins.length;
+  }
   game.enemiesKilled = 0;
   game.combo = 0;
   game.comboBest = 0;
@@ -161,6 +189,10 @@ function update(dt) {
   if (input.pressed("restart")) { reset(); return; }
   if (input.pressed("debug")) game.debug = !game.debug;
   if (input.pressed("theme")) cycleTheme();
+  if (input.pressed("mode")) {
+    reset(game.mode === "endless" ? "level" : "endless");
+    return;
+  }
 
   if (game.hitLagT > 0) {
     // 命中定帧：世界几乎停住，只让特效慢慢走，打击感来源
@@ -171,7 +203,31 @@ function update(dt) {
 
   const p = game.player;
   if (!game.won) p.update(dt, input, game);
+
+  // ---- 无尽模式：计生存时间 + 从两侧刷怪
+  if (game.mode === "endless" && game.spawner) {
+    if (p.state !== "dead") game.surviveTime += dt;
+    game.waveT = Math.max(0, game.waveT - dt);
+    const wave = game.spawner.update(dt, game, W);
+    for (const e of wave) {
+      game.enemies.push(e);
+      // 刷怪点的提示特效，让玩家能预判
+      game.fx.spawn("spawn/spawn-portal", e.cx, e.y + e.h, { seed: e.cx });
+    }
+  }
+
   for (const e of game.enemies) e.update(dt, game);
+
+  // 清掉死透的和跑太远的（无尽模式会一直刷，必须回收）
+  if (game.mode === "endless") {
+    const cullBefore = game.enemies.length;
+    game.enemies = game.enemies.filter((e) => {
+      if (e.dead && e.deadT > 0.6) return false;
+      if (Math.abs(e.cx - p.cx) > W * 2.2) return false;   // 跑出视野两倍屏宽就回收
+      return true;
+    });
+    game.culled = (game.culled ?? 0) + (cullBefore - game.enemies.length);
+  }
 
   // 敌人接触伤害
   if (p.state !== "dead") {
@@ -191,6 +247,19 @@ function update(dt) {
       game.coins++;
       game.fx.spawn("ui/coin-collect", c.x + 2, c.y + 6, { count: 1, seed: Math.random() * 100 });
     }
+  }
+
+  // 无尽模式：死亡即结束（不自动复活，按 R 重开）
+  if (game.mode === "endless") {
+    if (p.state === "dead" && !game.won) {
+      game.won = true;
+      game.showHint = false;
+      game.fx.spawn("ui/level-up", p.cx, p.cy - 10, { seed: 5 });
+      game.shake(6);
+    }
+    followCamera(game.cam, p, game.level);
+    game.fx.update(dt, game.cam);
+    return;
   }
 
   // 终点
@@ -287,6 +356,12 @@ function drawExit(s, cam, colors) {
 // 无头浏览器的 rAF 会被节流，所以不能靠普通截图。
 const SCRIPTS = {
   idle: [],
+  endless: [
+    [0, 40, "right"], [40, 70, "attack"], [60, 90, "attack"],
+    [90, 130, "left"], [130, 160, "attack"], [150, 180, "attack"],
+    [180, 240, "right"], [240, 280, "attack"], [270, 300, "attack"],
+    [300, 360, "left"],
+  ],
   run: [[0, 400, "right"]],
   combat: [
     [0, 70, "right"], [70, 90, "attack"], [80, 100, "attack"], [95, 120, "attack"],
@@ -336,8 +411,40 @@ function makeScriptedInput(scriptName) {
     return want;
   }
 
+  // 无尽模式的自动操作：靠近最近的怪去打，被贴脸就退，蝙蝠在高处就跳起来砍
+  function autoPilotEndless() {
+    const p = game.player, L = game.level;
+    const want = new Set();
+    const alive = game.enemies.filter((e) => !e.dead);
+    if (p.state === "dead" || !alive.length) return want;
+
+    const near = alive.reduce((a, b) => (Math.abs(a.cx - p.cx) < Math.abs(b.cx - p.cx) ? a : b));
+    const dx = near.cx - p.cx, adx = Math.abs(dx);
+
+    if (adx > 26) want.add(dx > 0 ? "right" : "left");
+    else if (adx < 12 && p.hp < p.maxHp * 0.45) want.add(dx > 0 ? "left" : "right");
+
+    if (adx < 36 && Math.abs(near.cy - p.cy) < 34) want.add("attack");
+    if (near.type === "bat" && near.cy < p.cy - 14) want.add("jump");
+
+    // 被两只以上贴身，或血少且有敌人靠近时，用冲刺脱身（无敌帧）
+    const closeCount = alive.filter((e) => Math.abs(e.cx - p.cx) < 20 && Math.abs(e.cy - p.cy) < 26).length;
+    const inDanger = closeCount >= 2 || (p.hp < p.maxHp * 0.5 && adx < 22);
+    if (inDanger && p.dashCd <= 0) {
+      want.add("dash");
+      want.add(dx > 0 ? "left" : "right");   // 往反方向冲
+    }
+
+    // 别走到场地边缘被围死
+    if (p.cx < 140) want.add("right");
+    if (p.cx > L.pxW - 140) want.add("left");
+    return want;
+  }
+
   input.step = (i) => {
-    const active = auto ? autoPilot(i) : new Set(script.filter(([a, b]) => i >= a && i < b).map(([,, k]) => k));
+    const active = scriptName === "autoendless"
+      ? autoPilotEndless()
+      : auto ? autoPilot(i) : new Set(script.filter(([a, b]) => i >= a && i < b).map(([,, k]) => k));
     for (const k of active) if (!down.has(k)) just.add(k);
     for (const k of [...down]) if (!active.has(k)) { down.delete(k); rel.add(k); }
     for (const k of active) down.add(k);
@@ -385,7 +492,11 @@ async function boot() {
 
   game.sky = bakeSky(W, H);
   game.hills = bakeHills(PARALLAX_W, H);
-  reset();
+
+  // URL 参数可以指定模式：?mode=endless
+  const bootParams = new URLSearchParams(location.search);
+  const bootMode = bootParams.get("mode") === "endless" ? "endless" : "level";
+  reset(bootMode);
 
   // 无人看管的验证模式：跑 N 帧，把画布和状态交给本地服务器落盘
   const params = new URLSearchParams(location.search);

@@ -120,18 +120,21 @@ world.player = player;
   ok(world.hits >= 2, "连招能连上", `命中次数=${world.hits}`);
 }
 
-// ---- 5. 蓄力重砸
+// ---- 5. 蓄力重砸（用干净的角色，避免受前面连招测试的状态影响）
 {
-  const dummy = new Enemy("dummy", player.cx + 14, player.feet);
+  const ch = new Warrior(level.spawn.x, level.spawn.y);
+  world.player = ch;
+  const dummy = new Enemy("dummy", ch.cx + 14, ch.feet);
   world.enemies = [dummy];
   const hp0 = dummy.hp;
   const input = new FakeInput();
   input.press("heavy");
-  for (let i = 0; i < 30; i++) { player.update(1 / 60, input, world); input.endFrame(); }
-  ok(player.charging, "按住 K 在蓄力");
+  for (let i = 0; i < 30; i++) { ch.update(1 / 60, input, world); input.endFrame(); }
+  ok(ch.charging, "按住 K 在蓄力", `charge=${ch.charge.toFixed(2)}`);
   input.release("heavy");
-  for (let i = 0; i < 60; i++) { player.update(1 / 60, input, world); input.endFrame(); }
+  for (let i = 0; i < 60; i++) { ch.update(1 / 60, input, world); input.endFrame(); }
   ok(dummy.hp < hp0, "重砸有伤害", `hp ${hp0} -> ${dummy.hp}`);
+  world.player = player;
 }
 
 // ---- 6. 掉进坑里会被拉回来
@@ -342,6 +345,20 @@ world.player = player;
   } catch (e) {
     const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
     ok(false, "动画平滑度检查（smooth.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
+// ---- 13. 无尽模式（刷怪 / 难度递增 / 上限 / 长跑稳定性）
+{
+  const { execFileSync } = await import("node:child_process");
+  const endlessPath = fileURLToPath(new URL("./endless.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [endlessPath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("结束时：")) ?? "";
+    ok(out.includes("全部通过"), "无尽模式检查（endless.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "无尽模式检查（endless.mjs）", bad.join(" | ").slice(0, 200));
   }
 }
 

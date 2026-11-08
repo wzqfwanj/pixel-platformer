@@ -242,6 +242,11 @@ export class Warrior {
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.comboTimer = Math.max(0, this.comboTimer - dt);
     this.attackBuffer = Math.max(0, this.attackBuffer - dt);
+    if (this.dashInvuln > 0) {
+      this.dashInvuln = Math.max(0, this.dashInvuln - dt);
+      // 冲刺无敌独立于受击无敌，用较长的那个
+      if (this.invuln < this.dashInvuln) this.invuln = this.dashInvuln;
+    }
     if (this.comboTimer <= 0 && !this.atk) this.comboIdx = 0;
 
     if (this.state === "dead") {
@@ -350,7 +355,8 @@ export class Warrior {
       }
 
       // 攻击键缓冲（按早了存着，窗口一开就用）
-      if (input.pressed("attack")) {
+      // 按住也算：按住不放就会自己连下去，符合大多数动作游戏的直觉
+      if (input.pressed("attack") || input.held("attack")) {
         this.attackBuffer = this.cfg.attackBuffer;
         this.lastBufferPeak = Math.max(this.lastBufferPeak ?? 0, this.attackBuffer);
       }
@@ -410,6 +416,8 @@ export class Warrior {
     if (input.pressed("dash") && this.dashCd <= 0) {
       this.dashT = this.cfg.dashTime;
       this.dashCd = this.cfg.dashCd;
+      // 冲刺前半段无敌：被围住时这是唯一的脱身手段
+      this.dashInvuln = this.cfg.dashTime * 0.8;
       world.fx.spawn("impacts/hit-spark", this.cx - this.facing * 6, this.cy, { flip: this.facing < 0, palette: WARRIOR_PALETTE, seed: Math.random() * 100 });
       return;
     }

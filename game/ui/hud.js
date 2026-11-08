@@ -49,9 +49,33 @@ export function drawHud(s, game) {
   s.outline(bx - 1, by - 1, bw + 2, bh + 2, C.barEdge);
   drawText(s, `${Math.ceil(p.hp)}`, bx + bw + 3, by, C.text, { shadow: sh });
 
-  // ---- 右上：金币 / 击杀
-  drawText(s, `COIN ${game.coins}/${game.coinTotal}`, 316, 6, C.accent, { align: "right", shadow: sh });
-  drawText(s, `${game.enemiesKilled} KILL`, 316, 14, C.dim, { align: "right", shadow: sh });
+  if (game.mode === "endless") {
+    // 无尽模式右上：生存时间（大字）+ 击杀数 + 下一波倒计时
+    const t = game.surviveTime ?? 0;
+    const mm = Math.floor(t / 60);
+    const ss = Math.floor(t % 60);
+    const timeStr = `${mm}:${String(ss).padStart(2, "0")}`;
+    drawText(s, timeStr, 316, 4, C.accent, { font: "big", align: "right", shadow: sh });
+    drawText(s, `${game.enemiesKilled} KILL`, 316, 14, C.dim, { align: "right", shadow: sh });
+
+    // 左下：波次 + 场上敌人数
+    const alive = game.enemies.filter((e) => !e.dead).length;
+    const ph = game.spawner?.phase;
+    if (ph) {
+      drawText(s, ph.name, 4, 160, C.text, { shadow: sh });
+      drawText(s, `NEXT ${(game.spawner.countdown).toFixed(1)}s   ON ${alive}`, 4, 166, C.dim, { shadow: sh });
+    }
+
+    // 波次切换的提示文字（闪 2 秒）
+    if ((game.waveT ?? 0) > 0) {
+      const a = Math.min(1, game.waveT);
+      drawText(s, game.waveText, 160, 46, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
+    }
+  } else {
+    // ---- 关卡模式右上：金币 / 击杀
+    drawText(s, `COIN ${game.coins}/${game.coinTotal}`, 316, 6, C.accent, { align: "right", shadow: sh });
+    drawText(s, `${game.enemiesKilled} KILL`, 316, 14, C.dim, { align: "right", shadow: sh });
+  }
 
   // ---- 连击：当前连击大字，峰值小字
   if (game.combo >= 2) {
@@ -63,7 +87,7 @@ export function drawHud(s, game) {
 
   // ---- 底部操作提示
   if (game.showHint) {
-    const hint = "A D MOVE  SPACE JUMP  J ATTACK  K HEAVY  SHIFT DASH  T THEME  R RESTART";
+    const hint = "A D MOVE  SPACE JUMP  J ATTACK  K HEAVY  SHIFT DASH  T THEME  M MODE  R RESTART";
     s.rect(0, 167, 320, 13, C.panel);
     s.hline(0, 167, 320, C.ink);
     drawText(s, hint, 160, 171, C.dim, { align: "center", shadow: sh });
@@ -81,13 +105,21 @@ export function drawHud(s, game) {
 
   // ---- 结算 / 死亡
   if (game.won) {
-    s.rect(0, 62, 320, 52, C.panel);
-    s.hline(0, 62, 320, C.ink);
-    s.hline(0, 113, 320, C.ink);
-    drawText(s, "STAGE CLEAR", 160, 72, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
-    drawText(s, `COINS ${game.coins}/${game.coinTotal}   KILLS ${game.enemiesKilled}`, 160, 94, C.text, { align: "center", shadow: sh });
-    drawText(s, "PRESS R TO PLAY AGAIN", 160, 104, C.dim, { align: "center", shadow: sh });
-  } else if (p.state === "dead") {
+    s.rect(0, 58, 320, 58, C.panel);
+    s.hline(0, 58, 320, C.ink);
+    s.hline(0, 115, 320, C.ink);
+    const endless = game.mode === "endless";
+    drawText(s, endless ? "GAME OVER" : "STAGE CLEAR", 160, 66, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
+    if (endless) {
+      const t = game.surviveTime ?? 0;
+      const mm = Math.floor(t / 60), ss = Math.floor(t % 60);
+      drawText(s, `SURVIVED ${mm}:${String(ss).padStart(2, "0")}   KILLS ${game.enemiesKilled}`, 160, 90, C.text, { align: "center", shadow: sh });
+      drawText(s, `BEST COMBO x${game.comboBest ?? 0}`, 160, 100, C.dim, { align: "center", shadow: sh });
+    } else {
+      drawText(s, `COINS ${game.coins}/${game.coinTotal}   KILLS ${game.enemiesKilled}`, 160, 92, C.text, { align: "center", shadow: sh });
+    }
+    drawText(s, endless ? "R RESTART   M TOGGLE MODE" : "R RESTART   M ENDLESS MODE", 160, 108, C.dim, { align: "center", shadow: sh });
+  } else if (p.state === "dead" && game.mode !== "endless") {
     s.rect(0, 74, 320, 26, C.panel);
     drawText(s, "YOU DIED", 160, 80, C.accent, { font: "big", scale: 2, align: "center", shadow: sh });
   }

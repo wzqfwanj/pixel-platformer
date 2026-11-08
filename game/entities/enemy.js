@@ -2,6 +2,7 @@
 
 import { hex, clamp } from "../core/util.js";
 import { SpritePlate } from "../core/spriteplate.js";
+import { ENEMY_ART2, ENEMY_PAL2 } from "./enemyArt.js";
 
 const P = {
   straw: hex("#d8b064"), strawD: hex("#a87c3c"), strawL: hex("#f0d090"),
@@ -12,6 +13,7 @@ const P = {
 };
 
 const ART = {
+  ...ENEMY_ART2,
   dummy: [
     "...kkkk....",
     "..kssssk...",
@@ -52,13 +54,35 @@ const PAL = {
   k: P.ink, s: P.straw, S: P.strawD, L: P.strawL, w: P.wood, r: P.band, R: P.bandL,
   g: P.green, G: P.greenD, e: P.eye,
 };
+
+// 新增敌人的调色板（蝙蝠/骷髅/石像鬼）
+const PAL2 = { ...PAL, ...ENEMY_PAL2, ...Object.fromEntries(Object.entries(ENEMY_PAL2).flatMap(([k, v]) => Object.entries(v))) };
+
 const WHITE_PAL = Object.fromEntries(Object.keys(PAL).map((c) => [c, P.white]));
 
 const plate = new SpritePlate(16, 22);
 
 const TYPES = {
+  // 原有关卡用
   dummy: { w: 12, h: 18, hp: 40, art: "dummy", speed: 0, contact: 0, xp: 20 },
   slime: { w: 11, h: 8, hp: 20, art: "slime", speed: 20, contact: 8, xp: 10 },
+
+  // 无尽模式用 —— 从两侧刷出来往玩家身上扑
+  // 蝙蝠：会飞，走正弦上下飘，不受重力
+  bat: {
+    w: 10, h: 8, hp: 14, art: "bat", speed: 54, contact: 6, xp: 12,
+    fly: true, flying: true,
+  },
+  // 骷髅：地面单位，会往玩家方向小跳
+  skull: {
+    w: 10, h: 9, hp: 26, art: "skull", speed: 30, contact: 9, xp: 18,
+    hops: true,
+  },
+  // 石像鬼：慢、血厚，会蓄力后冲撞
+  gargoyle: {
+    w: 11, h: 9, hp: 46, art: "gargoyle", speed: 22, contact: 13, xp: 30,
+    charges: true,
+  },
 };
 
 export class Enemy {
@@ -85,6 +109,12 @@ export class Enemy {
     this.contactCd = 0;
     this.grounded = false;
     this.homeX = x;
+    this.hopCd = 0;
+    this.chargeT = 0;
+    this.chargeCd = 0;
+    this.charging = false;
+    this.chargeLeft = 0;
+    this.grounded = false;
   }
 
   get box() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
@@ -141,27 +171,86 @@ export class Enemy {
 
     const L = world.level;
 
-    if (this.type === "slime" && this.hitStun <= 0) {
-      const p = world.player;
-      const dx = p.cx - this.cx;
-      if (Math.abs(dx) < 70 && Math.abs(p.cy - this.cy) < 40) {
-        this.dir = Math.sign(dx) || 1;
-        this.vx = this.dir * 34;
-      } else {
-        this.vx = this.dir * this.def.speed;
-        // 走到出生点附近就掉头，别掉进坑
-        if (Math.abs(this.cx - this.homeX) > 40) this.dir = Math.sign(this.homeX - this.cx);
-      }
-      // 前面没路就掉头
-      const aheadX = this.cx + this.dir * (this.w / 2 + 3);
-      if (!L.solidAt(aheadX, this.y + this.h + 2)) {
-        this.dir *= -1;
-        this.vx = 0;
+    const p = world.player;
+
+    if (this.hitStun <= 0) {
+      switch (this.type) {
+        case "slime": {
+          const dx = p.cx - this.cx;
+          if (Math.abs(dx) < 70 && Math.abs(p.cy - this.cy) < 40) {
+            this.dir = Math.sign(dx) || 1;
+            this.vx = this.dir * 34;
+          } else {
+            this.vx = this.dir * this.def.speed;
+            if (Math.abs(this.cx - this.homeX) > 40) this.dir = Math.sign(this.homeX - this.cx);
+          }
+          const aheadX = this.cx + this.dir * (this.w / 2 + 3);
+          if (!L.solidAt(aheadX, this.y + this.h + 2)) { this.dir *= -1; this.vx = 0; }
+          break;
+        }
+
+        case "bat": {
+          // 飞行：一直朝玩家水平逼近，竖直用正弦飘移（不受重力）
+          const dx = p.cx - this.cx;
+          this.dir = Math.sign(dx) || this.dir;
+          // 靠近后不硬贴，减速盘旋，给玩家反击窗口
+          const dist = Math.abs(dx);
+          const speed = dist < 26 ? this.def.speed * 0.35 : this.def.speed;
+          this.vx = this.dir * speed;
+          // 竖直：朝玩家胸口靠，同时叠正弦让轨迹飘忽
+          const targetY = p.cy - this.h / 2;
+          const bob = Math.sin(this.t * 3.4 + this.homeX) * 14;
+          this.vy = (targetY + bob - this.cy) * 2.2;
+          this.vy = Math.max(-90, Math.min(90, this.vy));
+          break;
+        }
+
+        case "skull": {
+          // 地面：朝玩家走，间隔起跳越过障碍
+          const dx = p.cx - this.cx;
+          this.dir = Math.sign(dx) || this.dir;
+          this.vx = this.dir * this.def.speed;
+          this.hopCd = (this.hopCd ?? 0) - dt;
+          if (this.grounded && this.hopCd <= 0 && Math.abs(dx) > 18) {
+            this.vy = -250;
+            this.hopCd = 0.9 + Math.random() * 0.5;
+          }
+          break;
+        }
+
+        case "gargoyle": {
+          // 慢速推进；进入范围后先蓄力（亮眼 + 不动），然后猛冲
+          const dx = p.cx - this.cx;
+          this.dir = Math.sign(dx) || this.dir;
+          this.chargeT = (this.chargeT ?? 0) + dt;
+
+          if (this.charging) {
+            // 冲撞中：保持高速，撞到东西或超时就结束
+            this.vx = this.dir * this.def.speed * 4.2;
+            this.chargeLeft -= dt;
+            if (this.chargeLeft <= 0) {
+              this.charging = false;
+              this.chargeT = 0;
+              this.chargeCd = 2.2;
+            }
+          } else if (this.chargeCd > 0) {
+            this.chargeCd -= dt;
+            this.vx = this.dir * this.def.speed * 0.6;
+          } else if (this.chargeT > 1.1 && Math.abs(dx) < 90) {
+            // 蓄力结束，冲
+            this.charging = true;
+            this.chargeLeft = 0.42;
+            world.fx.spawn("impacts/hit-spark", this.cx, this.cy, { flip: this.dir < 0 });
+          } else {
+            this.vx = this.dir * this.def.speed;
+          }
+          break;
+        }
       }
     }
 
-    // ---- 重力 + 碰撞
-    this.vy = Math.min(420, this.vy + 1000 * dt);
+    // ---- 重力 + 碰撞（飞行单位不受重力）
+    if (!this.def.flying) this.vy = Math.min(420, this.vy + 1000 * dt);
 
     this.x += this.vx * dt;
     if (L.solidRect(this.x, this.y, this.w, this.h)) {

@@ -11,6 +11,7 @@ const MAP = {
   dash: ["ShiftLeft", "ShiftRight", "KeyL"],
   restart: ["KeyR"],
   theme: ["KeyT"],
+  mode: ["KeyM"],
   debug: ["F1", "Backquote"],
 };
 

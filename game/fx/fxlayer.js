@@ -26,6 +26,7 @@ const LOADERS = {
   "ui/coin-collect": () => import("../../pixelfx/src/fx/ui/coin-collect.js"),
   "ui/level-up": () => import("../../pixelfx/src/fx/ui/level-up.js"),
   "spawn/poof": () => import("../../pixelfx/src/fx/spawn/poof.js"),
+  "spawn/spawn-portal": () => import("../../pixelfx/src/fx/spawn/spawn-portal.js"),
   "spawn/disintegrate": () => import("../../pixelfx/src/fx/spawn/disintegrate.js"),
   "status/burning": () => import("../../pixelfx/src/fx/status/burning.js"),
 };
