@@ -1,0 +1,30 @@
+# 生成的产物（每次跑 tool 都会重写，不入库）
+game/preview.png
+game/preview@3x.png
+game/preview-*.png
+game/preview.json
+game/records/
+game/tools/records/
+
+# pixelfx 是上游依赖（patch-gg/pixelfx，MIT），用 git clone 获取，不重复入库
+pixelfx/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# 无头浏览器临时目录
+game/tools/.chrome-profile/
+game/tools/.shot-profile-*/
+game/tools/.jitter-profile-*/
+game/tools/.theme-profile-*/
+
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+
+# ���ع���״̬
+.agent/

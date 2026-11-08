@@ -1,0 +1,424 @@
+// 横板像素闯关 demo —— 战士职业
+// 渲染全软件：一块 320x180 的 Uint32 缓冲，最后 putImageData 一次。
+// 特效来自 pixelfx（同目录上级的 ../pixelfx），光照会叠到场景上。
+
+import { Surface, blitRect } from "./core/screen.js";
+import { hex, aabb } from "./core/util.js";
+import { Input } from "./core/input.js";
+import { drawText } from "./core/text.js";
+import { Level } from "./world/level.js";
+import { bakeSky, bakeHills, PARALLAX_W } from "./world/background.js";
+import { placeCamera, followCamera, renderCamera } from "./world/camera.js";
+import { coinRows, COIN_COLORS } from "./world/tiles.js";
+import { Warrior } from "./entities/warrior.js";
+import { Enemy } from "./entities/enemy.js";
+import { FxLayer, WARRIOR_PALETTE } from "./fx/fxlayer.js";
+import { drawHud } from "./ui/hud.js";
+import { collectCoins } from "./world/pickups.js";
+import { getTheme, setTheme, toggleTheme, applyThemeToPage, themeNames } from "./core/theme.js";
+
+const W = 320, H = 180;
+const STEP = 1 / 60;
+
+// 主题：明暗切换 + 黑白色调，具体色值定义在 core/theme.js。
+// 这里只负责"当前主题下画布底色和传送门该用什么颜色"。
+function getThemeColors() {
+  const t = getTheme();
+  const dark = t.name === "dark";
+  return {
+    bg: hex(t.canvasBg),
+    exitLight: dark ? hex("#ffd08a") : hex("#b08850"),
+    exitText: dark ? hex("#ffd94a") : hex("#7a6030"),
+    exitShadow: dark ? hex("#141021") : undefined,
+    exitArchA: dark ? hex("#6a7a9a") : hex("#7a7a7a"),
+    exitArchB: dark ? hex("#2b3348") : hex("#b0b0b0"),
+  };
+}
+
+const game = {
+  W, H,
+  level: null,
+  baked: null,
+  sky: null,
+  hills: null,
+  player: null,
+  enemies: [],
+  fx: new FxLayer(),
+  input: new Input(),
+  cam: { x: 0, y: 0 },
+  shakeAmt: 0,
+  hitLagT: 0,
+  time: 0,
+  fps: 60,
+  coins: 0,
+  coinTotal: 0,
+  enemiesKilled: 0,
+  combo: 0,
+  comboTimer: 0,
+  won: false,
+  debug: false,
+  showHint: true,
+};
+
+// ---------------- world 接口（实体里回调这些）
+game.shake = (a) => { game.shakeAmt = Math.max(game.shakeAmt, a); };
+game.hitLag = (t) => { game.hitLagT = Math.max(game.hitLagT, t); };
+game.onHit = (n) => {
+  game.combo += n;
+  game.comboTimer = 1.6;
+  if (game.combo >= 3 && game.combo % 3 === 0) {
+    game.fx.spawn("ui/combo-counter", game.player.cx, game.player.y - 16, {
+      count: game.combo, palette: WARRIOR_PALETTE, seed: Math.random() * 100,
+    });
+  }
+};
+game.onEnemyKilled = () => {
+  game.enemiesKilled++;
+  game.shake(2.5);
+};
+game.respawnPlayer = () => {
+  const p = game.player;
+  p.hp = p.maxHp;
+  p.state = "idle";
+  p.deadT = 0;
+  p.x = p.safe.x - p.w / 2;
+  p.y = p.safe.y - p.h;
+  p.vx = 0; p.vy = 0;
+  p.invuln = 1.2;
+  game.shake(4);
+};
+
+// ---------------- 主题
+function cycleTheme() {
+  const t = toggleTheme();
+  applyThemeToPage(t);
+  try { localStorage.setItem("theme", t.name); } catch { /* 隐私模式下忽略 */ }
+  return t;
+}
+
+/** 启动时决定用哪套主题：URL 参数 > 上次选择 > 跟随系统 */
+function initTheme() {
+  const q = new URLSearchParams(location.search).get("theme");
+  let name = q && themeNames.includes(q) ? q : null;
+  if (!name) {
+    try { name = localStorage.getItem("theme"); } catch { name = null; }
+  }
+  if (!name || !themeNames.includes(name)) {
+    name = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  applyThemeToPage(setTheme(name));
+
+  const btn = document.getElementById("theme");
+  if (btn) btn.addEventListener("click", () => { cycleTheme(); btn.blur(); });
+}
+
+// ---------------- 初始化
+function reset() {
+  game.level = new Level();
+  game.baked = game.level.bake();
+  game.player = new Warrior(game.level.spawn.x, game.level.spawn.y);
+  game.player.safe = { x: game.level.spawn.x, y: game.level.spawn.y };
+  game.enemies = game.level.enemySpawns.map((e) => new Enemy(e.type, e.x, e.y));
+  game.coins = 0;
+  game.coinTotal = game.level.coins.length;
+  game.enemiesKilled = 0;
+  game.combo = 0;
+  game.comboTimer = 0;
+  game.won = false;
+  game.shakeAmt = 0;
+  game.hitLagT = 0;
+  for (const c of game.level.coins) { c.taken = false; c.played = false; }
+  // 火把是常驻的循环特效
+  for (const t of game.level.torches) game.fx.spawn("fire/torch", t.x, t.y + 2, { sticky: true, lift: 1.25 });
+  placeCamera(game.cam, game.player, game.level);
+}
+
+// ---------------- 每帧逻辑
+function update(dt) {
+  const input = game.input;
+  game.time += dt;
+  game.comboTimer = Math.max(0, game.comboTimer - dt);
+  if (game.comboTimer <= 0) game.combo = 0;
+  game.shakeAmt = Math.max(0, game.shakeAmt - dt * 22);
+
+  if (input.pressed("restart")) { reset(); return; }
+  if (input.pressed("debug")) game.debug = !game.debug;
+  if (input.pressed("theme")) cycleTheme();
+
+  if (game.hitLagT > 0) {
+    // 命中定帧：世界几乎停住，只让特效慢慢走，打击感来源
+    game.hitLagT -= dt;
+    game.fx.update(dt * 0.12, game.cam);
+    return;
+  }
+
+  const p = game.player;
+  if (!game.won) p.update(dt, input, game);
+  for (const e of game.enemies) e.update(dt, game);
+
+  // 敌人接触伤害
+  if (p.state !== "dead") {
+    for (const e of game.enemies) {
+      if (e.dead || e.def.contact <= 0 || e.contactCd > 0) continue;
+      if (aabb(p.box, e.box) && p.invuln <= 0) {
+        if (p.takeDamage(e.def.contact, e.cx, game)) e.contactCd = 0.8;
+      }
+    }
+  }
+
+  // 金币
+  if (collectCoins(p.box, game.level.coins) > 0) {
+    for (const c of game.level.coins) {
+      if (!c.taken || c.played) continue;
+      c.played = true;
+      game.coins++;
+      game.fx.spawn("ui/coin-collect", c.x + 2, c.y + 6, { count: 1, seed: Math.random() * 100 });
+    }
+  }
+
+  // 终点
+  const ex = game.level.exit;
+  if (!game.won && Math.abs(p.cx - ex.x) < 14 && Math.abs(p.feet - ex.y) < 40) {
+    game.won = true;
+    game.showHint = false;
+    game.fx.spawn("ui/level-up", ex.x, ex.y - 24, { seed: 12 });
+    game.fx.spawn("fire/flame-pillar", ex.x, ex.y, { seed: 7 });
+    game.shake(5);
+  }
+
+  followCamera(game.cam, p, game.level);
+  game.fx.update(dt, game.cam);
+}
+
+/** 固定步长推进。每次 update 之后都要清掉"刚按下"标记，否则一帧内跑两次会重复触发。 */
+function advance(realDt) {
+  let acc = realDt;
+  let guard = 0;
+  while (acc >= STEP && guard++ < 5) {
+    update(STEP);
+    game.input.endFrame();
+    acc -= STEP;
+  }
+}
+
+// ---------------- 渲染
+function render(scratch) {
+  const s = scratch;
+  const colors = getThemeColors();
+  
+  s.clearLight();
+  s.clear(colors.bg);
+
+  const cam = renderCamera(game.cam, game.shakeAmt);
+
+  // 天空
+  blitRect(game.sky, s, 0, 0, W, H, 0, 0);
+  // 视差山脊（横向循环）
+  const off = Math.round((cam.x * 0.28) % PARALLAX_W);
+  for (let i = -1; i <= 1; i++) blitRect(game.hills, s, 0, 0, PARALLAX_W, H, i * PARALLAX_W - off, 0);
+  // 关卡
+  blitRect(game.baked, s, cam.x, cam.y, W, H, 0, 0);
+
+  drawExit(s, cam, colors);
+
+  // 金币
+  const phase = Math.floor(game.time * 8);
+  for (const c of game.level.coins) {
+    if (c.taken) continue;
+    const bob = Math.round(Math.sin(game.time * 3 + c.x * 0.2) * 1.5);
+    const sx = c.x - cam.x, sy = c.y - cam.y + bob;
+    if (sx < -8 || sx > W + 8) continue;
+    s.sprite(coinRows(phase + c.phase), COIN_COLORS, Math.round(sx), Math.round(sy));
+    s.addGlow(sx + 2, sy + 4, 7, 30, 20, 0);
+  }
+
+  // 特效：角色后面那层
+  game.fx.drawBack(s, cam);
+
+  for (const e of game.enemies) e.draw(s, cam);
+  game.player.draw(s, cam);
+
+  // 特效：角色前面那层（光照在 blit 时叠上去）
+  game.fx.drawFront(s, cam);
+
+  drawHud(s, game);
+  s.composite(scratch.out);
+}
+
+function drawExit(s, cam, colors) {
+  const ex = game.level.exit;
+  const x = ex.x - cam.x, y = ex.y - cam.y;
+  if (x < -40 || x > W + 40) return;
+  const archTop = Math.round(y - 34);
+  for (let k = 0; k < 3; k++) {
+    const a = colors.exitArchA, b = colors.exitArchB;
+    s.rect(x - 9 + k, archTop + 6 + k, 2, 28, k === 0 ? a : b);
+    s.rect(x + 7 - k, archTop + 6 + k, 2, 28, k === 0 ? a : b);
+    s.rect(x - 9 + k, archTop + 4 + k, 18 - k * 2, 2, k === 0 ? a : b);
+  }
+  for (let j = 0; j < 26; j++) {
+    const k = 1 - j / 26;
+    const wj = Math.max(2, Math.round(13 * k));
+    for (let i = -wj; i <= wj; i++) s.blendPx(x + i, archTop + 30 - j, colors.exitLight, 0.09 + 0.12 * k);
+  }
+  s.addGlow(x, y - 18, 26, 70, 45, 12);
+  drawText(s, "EXIT", x, archTop - 9, colors.exitText, { align: "center", shadow: colors.exitShadow });
+}
+
+// ---------------- 无人看管的快速验证：?frames=N&script=名称
+// 同步推进 N 帧再画一张，把画面和状态通过 HTTP 交给服务器。
+// 无头浏览器的 rAF 会被节流，所以不能靠普通截图。
+const SCRIPTS = {
+  idle: [],
+  run: [[0, 400, "right"]],
+  combat: [
+    [0, 70, "right"], [70, 90, "attack"], [80, 100, "attack"], [95, 120, "attack"],
+    [130, 190, "right"], [190, 215, "jump"], [200, 260, "right"],
+    [262, 292, "heavy"], [300, 340, "right"], [345, 375, "attack"],
+  ],
+  showcase: [
+    [0, 62, "right"], [62, 86, "attack"], [78, 104, "attack"], [96, 128, "attack"],
+    [140, 200, "heavy"], [206, 250, "right"],
+  ],
+  explore: [[0, 240, "right"], [60, 74, "jump"], [120, 134, "jump"], [180, 194, "jump"]],
+};
+
+function makeScriptedInput(scriptName) {
+  const script = SCRIPTS[scriptName] ?? SCRIPTS.combat;
+  const down = new Set(), just = new Set(), rel = new Set();
+  const ai = { jumpHold: 0, cooldown: 0 };
+  const auto = scriptName === "auto";
+
+  const input = {
+    held: (a) => down.has(a),
+    pressed: (a) => just.has(a),
+    letGo: (a) => rel.has(a),
+    axis: () => (down.has("right") ? 1 : 0) - (down.has("left") ? 1 : 0),
+    endFrame: () => { just.clear(); rel.clear(); },
+  };
+
+  // 自动闯关：一路向右，前面是坑/被挡住就跳，敌人近了就砍。
+  // 跳跃键要"松开"，因为 pressed() 是边沿触发，按住不放不会重复起跳。
+  function autoPilot(i) {
+    const p = game.player, L = game.level;
+    const want = new Set(["right"]);
+    if (p.state !== "dead") {
+      const aheadX = p.cx + 13;
+      const pitAhead = !L.solidAt(aheadX, p.feet + 6) && !L.solidAt(aheadX, p.feet + 22);
+      const wallAhead = L.solidAt(p.cx + p.w / 2 + 5, p.feet - 8) || L.solidAt(p.cx + p.w / 2 + 5, p.feet - 16);
+      if (ai.cooldown > 0) ai.cooldown--;
+      else if (ai.jumpHold > 0) {
+        want.add("jump");
+        if (--ai.jumpHold === 0) ai.cooldown = 10;
+      } else if (p.onGround && (pitAhead || wallAhead || Math.abs(p.vx) < 6)) {
+        ai.jumpHold = 13;
+        want.add("jump");
+      }
+      if (game.enemies.find((e) => !e.dead && Math.abs(e.cx - p.cx) < 34 && Math.abs(e.cy - p.cy) < 30)) want.add("attack");
+    }
+    return want;
+  }
+
+  input.step = (i) => {
+    const active = auto ? autoPilot(i) : new Set(script.filter(([a, b]) => i >= a && i < b).map(([,, k]) => k));
+    for (const k of active) if (!down.has(k)) just.add(k);
+    for (const k of [...down]) if (!active.has(k)) { down.delete(k); rel.add(k); }
+    for (const k of active) down.add(k);
+  };
+  return input;
+}
+
+function runHeadless(frames, scriptName) {
+  const realInput = game.input;
+  game.input = makeScriptedInput(scriptName);
+  for (let i = 0; i < frames; i++) {
+    game.input.step(i);
+    update(STEP);
+    game.input.endFrame();
+  }
+  game.input = realInput;
+  return frames;
+}
+
+// ---------------- 启动
+async function boot() {
+  initTheme();
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  const info = document.getElementById("info");
+
+  const buf = new Surface(W, H);
+  buf.out = new Uint8ClampedArray(W * H * 4);
+  const img = new ImageData(buf.out, W, H);
+
+  function resize() {
+    const k = Math.max(1, Math.floor(Math.min(window.innerWidth / W, (window.innerHeight - 4) / H)));
+    canvas.width = W;
+    canvas.height = H;
+    canvas.style.width = W * k + "px";
+    canvas.style.height = H * k + "px";
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  info.textContent = "载入 pixelfx 特效…";
+  const n = await game.fx.preload();
+  info.textContent = `已载入 ${n} 个特效`;
+
+  game.sky = bakeSky(W, H);
+  game.hills = bakeHills(PARALLAX_W, H);
+  reset();
+
+  // 无人看管的验证模式：跑 N 帧，把画布和状态交给本地服务器落盘
+  const params = new URLSearchParams(location.search);
+  const hf = Number(params.get("frames") || 0);
+  if (hf > 0) {
+    const script = params.get("script") || "combat";
+    runHeadless(hf, script);
+    render(buf);
+    ctx.putImageData(img, 0, 0);
+    const p = game.player;
+    const meta = {
+      n: hf, script,
+      px: Math.round(p.cx), py: Math.round(p.feet), state: p.state, hp: Math.round(p.hp),
+      cam: { x: game.cam.x, y: game.cam.y },
+      enemies: game.enemies.map((e) => ({ t: e.type, x: Math.round(e.cx), y: Math.round(e.feet), dead: e.dead, hp: Math.round(e.hp) })),
+      torches: game.level.torches.map((t) => ({ x: t.x, y: t.y })),
+      coins: game.level.coins.filter((c) => !c.taken).map((c) => ({ x: c.x, y: c.y })),
+      gotCoins: game.coins, totalCoins: game.coinTotal, fxCount: game.fx.count, exit: game.level.exit,
+    };
+    info.textContent = `headless: ${hf} 帧，特效 ${game.fx.count}, 玩家 ${p.state}`;
+    document.title = "S " + JSON.stringify({ script, px: meta.px, py: meta.py, state: p.state, coins: game.coins });
+    fetch("/__shot", { method: "POST", body: canvas.toDataURL("image/png") })
+      .then((r) => r.text()).then((t) => console.log("shot: " + t)).catch((e) => console.log("shot 失败：" + e.message));
+    fetch("/__meta", { method: "POST", body: JSON.stringify(meta) })
+      .then((r) => r.text()).then((t) => console.log("meta: " + t)).catch((e) => console.log("meta 失败：" + e.message));
+    return;
+  }
+
+  let last = performance.now();
+  let frames = 0, fpsT = 0;
+  function loop(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    frames++; fpsT += dt;
+    if (fpsT > 0.5) { game.fps = frames / fpsT; frames = 0; fpsT = 0; }
+
+    advance(dt);
+    render(buf);
+    ctx.putImageData(img, 0, 0);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("error", (e) => {
+  const el = document.getElementById("info");
+  if (el) el.textContent = `${e.message} @ ${e.filename}:${e.lineno}`;
+});
+
+boot().catch((e) => {
+  document.getElementById("info").textContent = "启动失败：" + e.message;
+  console.error(e);
+});

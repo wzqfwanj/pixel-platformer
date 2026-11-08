@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>像素闯关 · 战士</title>
+<style>
+  /* 极简 · 黑白 · 明暗切换 */
+  :root {
+    --page: #0a0a0a;
+    --page-text: #e6e6e6;
+    --frame: #2e2e2e;
+    --canvas-bg: #111111;
+  }
+  html[data-theme="light"] {
+    --page: #f2f2f2;
+    --page-text: #1a1a1a;
+    --frame: #cccccc;
+    --canvas-bg: #e8e8e8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--page);
+    color: var(--page-text);
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    overflow: hidden;
+    transition: background-color .2s ease, color .2s ease;
+  }
+  #wrap {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    box-shadow: 0 0 0 1px var(--frame);
+    background: var(--canvas-bg);
+  }
+  #info { opacity: .55; letter-spacing: .04em; }
+  #theme {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    padding: 6px 12px;
+    background: transparent;
+    color: var(--page-text);
+    border: 1px solid var(--frame);
+    border-radius: 0;
+    font: inherit;
+    cursor: pointer;
+  }
+  #theme:hover { border-color: var(--page-text); }
+</style>
+</head>
+<body>
+  <button id="theme" type="button" aria-label="切换明暗主题">暗色</button>
+  <div id="wrap">
+    <canvas id="game" width="320" height="180"></canvas>
+    <div id="info">载入中…</div>
+  </div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
