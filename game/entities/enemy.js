@@ -126,8 +126,14 @@ export class Enemy {
    * 命中反馈的强度由招式决定，敌人只负责照着演。
    */
   takeDamage(dmg, fromX, world, crit = false, opts = {}) {
+    // 已经死了就不再吃伤害：否则会重复触发击杀流程
     if (this.dead) return;
-    this.hp -= dmg;
+    // 防御：伤害必须是有限数，否则 hp 会变成 NaN 并污染后续所有计算
+    if (!Number.isFinite(dmg)) {
+      console.warn("[enemy] 收到非法伤害值:", dmg);
+      return;
+    }
+    this.hp = Math.max(0, this.hp - dmg);
     this.flash = 0.09;
     this.hitStun = opts.stun ?? 0.16;
 
@@ -149,7 +155,7 @@ export class Enemy {
     // 连段递增：第 2、3 下火花更大
     if (crit) world.fx.spawn("impacts/crit-hit", this.cx, this.cy, { seed: this.cx });
 
-    if (this.hp <= 0) {
+    if (this.hp <= 0 && !this.dead) {
       this.dead = true;
       this.deadT = 0;
       world.fx.spawn(this.type === "slime" ? "spawn/poof" : "spawn/disintegrate", this.cx, this.cy + this.h / 2);

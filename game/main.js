@@ -13,6 +13,7 @@ import { coinRows, COIN_COLORS } from "./world/tiles.js";
 import { Warrior } from "./entities/warrior.js";
 import { Enemy } from "./entities/enemy.js";
 import { FxLayer, WARRIOR_PALETTE } from "./fx/fxlayer.js";
+import { DebrisSystem } from "./fx/debris.js";
 import { drawHud } from "./ui/hud.js";
 import { collectCoins } from "./world/pickups.js";
 import { Spawner } from "./world/spawner.js";
@@ -46,6 +47,7 @@ const game = {
   player: null,
   enemies: [],
   fx: new FxLayer(),
+  debris: new DebrisSystem(),
   input: new Input(),
   cam: { x: 0, y: 0 },
   shakeAmt: 0,
@@ -172,6 +174,7 @@ function reset(mode = game.mode) {
   game.won = false;
   game.shakeAmt = 0;
   game.hitLagT = 0;
+  game.debris.clear();
   for (const c of game.level.coins) { c.taken = false; c.played = false; }
   // 火把是常驻的循环特效
   for (const t of game.level.torches) game.fx.spawn("fire/torch", t.x, t.y + 2, { sticky: true, lift: 1.25 });
@@ -198,6 +201,7 @@ function update(dt) {
     // 命中定帧：世界几乎停住，只让特效慢慢走，打击感来源
     game.hitLagT -= dt;
     game.fx.update(dt * 0.12, game.cam);
+    game.debris.update(dt * 0.12, game.level);
     return;
   }
 
@@ -259,6 +263,7 @@ function update(dt) {
     }
     followCamera(game.cam, p, game.level);
     game.fx.update(dt, game.cam);
+    game.debris.update(dt, game.level);
     return;
   }
 
@@ -274,6 +279,7 @@ function update(dt) {
 
   followCamera(game.cam, p, game.level);
   game.fx.update(dt, game.cam);
+  game.debris.update(dt, game.level);
 }
 
 /** 固定步长推进。每次 update 之后都要清掉"刚按下"标记，否则一帧内跑两次会重复触发。 */
@@ -325,6 +331,8 @@ function render(scratch) {
   game.player.draw(s, cam);
 
   // 特效：角色前面那层（光照在 blit 时叠上去）
+  // 碎石画在角色之后、特效之前：石头属于场景，但也该盖住脚下的地面
+  game.debris.draw(s, cam);
   game.fx.drawFront(s, cam);
 
   drawHud(s, game);

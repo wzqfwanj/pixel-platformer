@@ -34,26 +34,27 @@ export const CFG = {
   dashSpeed: 265,
   dashTime: 0.13,
   dashCd: 0.42,
-  // 蓄力斩（K）：唯一的长按技能。
-  // 判定是一条从身前伸出的横向长条，能同时砍到多个敌人（穿透），
-  // 蓄满时距离和伤害都涨。和之前的圆形砸地相比，更强调"向前打穿"而不是"原地清场"。
+  // 蓄力爆炸（K）：唯一的攻击方式。
+  // 松手在脚下炸开一圈范围伤害，蓄得越满半径越大、伤害越高，
+  // 蓄满时还会从地里掀起碎石（碎石有独立物理，会在世界里飞、落地、弹动）。
   heavy: {
-    id: "chargeSlash",
-    chargeMax: 0.55,   // 唯一攻击手段，蓄力时间不能太长
-    dmg: 14,
-    dmgPerCharge: 16,     // 蓄满总伤害 = 14 + 16 = 30
-    reachBase: 30,        // 基础攻击距离
-    reachPerCharge: 22,   // 蓄满再多 22（总 52）
-    hitH: 20,             // 判定高度
-    windup: 0.10,         // 松手到出刀
-    active: 0.13,         // 判定窗口
-    recover: 0.30,        // 收招
-    lunge: 96,            // 出刀前冲速度
-    shake: 5.5,
+    id: "chargeBlast",
+    chargeMax: 0.55,
+    dmg: 12,
+    dmgPerCharge: 18,       // 蓄满总伤害 = 12 + 18 = 30
+    radiusBase: 26,         // 基础爆炸半径
+    radiusPerCharge: 26,    // 蓄满再多 26（总 52）
+    windup: 0.09,           // 松手到爆炸
+    active: 0.12,           // 判定窗口
+    recover: 0.28,          // 收招
+    shake: 6,
     hitstop: 0.08,
-    pierce: true,         // 能打穿多个敌人
-    fx: "melee/heavy-cleave",
-    fxFull: "melee/spin-slash",   // 蓄满换更夸张的刀光
+    // 特效：爆点本体 + 地面冲击
+    fx: "explosions/dirt-explosion",
+    fxFull: "impacts/ground-slam",     // 蓄满时追加更大的一圈
+    // 碎石：蓄力越足越多
+    debrisBase: 5,
+    debrisPerCharge: 22,    // 蓄满 27 块
   },
 };
 
@@ -140,7 +141,7 @@ export class Warrior {
     this.charging = false;
     const k = Math.min(1, this.charge / this.cfg.heavy.chargeMax);
     if (this.chargeFx) { this.chargeFx.fx.stop(); this.chargeFx = null; }
-    // 松手进入蓄力斩的动作（前摇 -> 判定 -> 后摇），地面空中都能放
+    // 松手进入蓄力爆炸的动作（前摇 -> 爆炸 -> 后摇），地面空中都能放
     this.slash = { t: 0, phase: "windup", k, hits: new Set() };
     this.state = "attack";
     this.charge = 0;
@@ -148,53 +149,72 @@ export class Warrior {
   }
 
   /**
-   * 蓄力斩的判定：一条从身前伸出的横向长条。
-   * k = 蓄力比例（0..1），蓄满时攻击距离更远、伤害更高。
+   * 蓄力爆炸：以角色脚下为圆心的范围伤害。
+   * k = 蓄力比例（0..1）。蓄满时半径最大、伤害最高，并掀起大量碎石。
    */
-  doChargeSlash(world, k, hits) {
+  doChargeBlast(world, k) {
     const H = this.cfg.heavy;
     const dmg = H.dmg + Math.round(H.dmgPerCharge * k);
-    const reach = H.reachBase + H.reachPerCharge * k;
-    const dir = this.facing;
+    const radius = H.radiusBase + H.radiusPerCharge * k;
+    const cx = this.cx, cy = this.feet;      // 爆心在脚下
+    const full = k >= 0.85;
 
-    // 判定框：从身体边缘往前伸
-    const hb = dir > 0
-      ? { x: this.x + this.w - 2, y: this.y - 2, w: reach, h: H.hitH }
-      : { x: this.x + 2 - reach, y: this.y - 2, w: reach, h: H.hitH };
-
-    // 视觉：刀光 + 震屏 + 顿帧
-    const fxId = k >= 0.85 ? H.fxFull : H.fx;
-    world.fx.spawn(fxId, this.cx + dir * (reach * 0.45), this.cy, {
-      flip: dir < 0,
+    // ---- 视觉：地面炸开 + 尘土 + 震屏 + 顿帧
+    world.fx.spawn(H.fx, cx, cy, {
       palette: WARRIOR_PALETTE,
       seed: Math.random() * 100,
     });
-    // 蓄满额外加一道冲击
-    if (k >= 0.85) {
-      world.fx.spawn("impacts/crit-hit", this.cx + dir * reach * 0.6, this.cy, {
-        flip: dir < 0, seed: Math.random() * 100,
+    if (full) {
+      // 蓄满追加一圈更大的冲击波
+      world.fx.spawn(H.fxFull, cx, cy, {
+        palette: WARRIOR_PALETTE,
+        seed: Math.random() * 100,
       });
+      world.fx.spawn("impacts/crit-hit", cx, cy - 8, { seed: Math.random() * 100 });
     }
-    world.shake(H.shake + k * 4);
-    world.hitLag(H.hitstop + k * 0.03);
+    world.shake(H.shake + k * 5);
+    world.hitLag(H.hitstop + k * 0.04);
 
+    // ---- 碎石飞溅：这是蓄满最直观的反馈
+    const count = Math.round(H.debrisBase + H.debrisPerCharge * k);
+    world.debris?.burst(cx, cy, count, k);
+
+    // ---- 范围伤害：圆内所有敌人
     let hitCount = 0;
     for (const e of world.enemies) {
-      if (e.dead || hits.has(e)) continue;
-      const box = e.box;
-      const overlap = hb.x < box.x + box.w && hb.x + hb.w > box.x &&
-                      hb.y < box.y + box.h && hb.y + hb.h > box.y;
-      if (!overlap) continue;
-      hits.add(e);
-      // 击退方向按刀的方向，蓄满击退更远
-      e.takeDamage(dmg, this.cx, world, k >= 0.85, {
-        kb: (60 + 90 * k) * dir,
-        stun: 0.22 + 0.1 * k,
+      if (e.dead) continue;
+      // 用敌人碰撞盒的最近点算距离，比用中心点公平
+      const nx = Math.max(e.x, Math.min(cx, e.x + e.w));
+      const ny = Math.max(e.y, Math.min(cy, e.y + e.h));
+      const dx = nx - cx, dy = ny - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius) continue;
+
+      // 越靠近爆心伤害越高（边缘 70%，圆心 100%）
+      const falloff = 1 - 0.3 * (dist / radius);
+      const finalDmg = Math.max(1, Math.round(dmg * falloff));
+      // 击退方向：从爆心往外推
+      const sign = Math.sign(e.cx - cx);
+      const dir = Number.isFinite(sign) && sign !== 0 ? sign : this.facing;
+      const kb = (70 + 110 * k) * (1 - 0.4 * (dist / radius));
+
+      // 防御：任何一项非有限就跳过，避免把 NaN 传进敌人的血量和速度
+      if (!Number.isFinite(finalDmg) || !Number.isFinite(kb)) {
+        console.warn("[blast] 伤害计算异常", { finalDmg, kb, dist, radius, k, ecx: e.cx, cx });
+        continue;
+      }
+      e.takeDamage(finalDmg, cx, world, full, {
+        kb: kb * dir,
+        lift: full ? -120 * (1 - dist / radius) : 0,   // 蓄满会把敌人掀起来
+        stun: 0.25 + 0.15 * k,
       });
       hitCount++;
-      world.onHit?.(1, { crit: k >= 0.85 });
-      if (!H.pierce) break;
+      world.onHit?.(1, { crit: full });
     }
+
+    // ---- 自己也被震退一点（反作用力，手感更实）
+    if (this.onGround) this.vy = Math.min(this.vy, -60 - 40 * k);
+
     return hitCount;
   }
 
@@ -254,7 +274,7 @@ export class Warrior {
       return;
     }
 
-    // ---- 蓄力斩动作中
+    // ---- 蓄力爆炸动作中
     if (this.slash) {
       this.slash.t += dt;
       const H = this.cfg.heavy;
@@ -262,9 +282,9 @@ export class Warrior {
 
       if (this.slash.phase === "windup" && this.slash.t >= t1) {
         this.slash.phase = "active";
-        // 出刀瞬间前冲
-        this.vx = this.facing * H.lunge;
-        this.doChargeSlash(world, this.slash.k, this.slash.hits);
+        // 爆炸是原地技能，不需要前冲
+        this.vx *= 0.2;
+        this.doChargeBlast(world, this.slash.k);
       }
 
       // 出刀后速度快速衰减（保留一点前冲惯性）
