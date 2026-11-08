@@ -163,11 +163,12 @@ export class Warrior {
     world.fx.spawn(H.fx, cx, cy, {
       palette: WARRIOR_PALETTE,
       seed: Math.random() * 100,
+      maxSame: 1,
     });
     // 蓄满：换成 ground-slam —— 地面闪红开裂、石头喷出弹跳、两道冲击波沿地面推开。
     // 这个特效本身就包含"地形变红 + 碎石飞溅"，不需要另做一套。
     if (full) {
-      world.fx.spawn(H.fxFull, cx, cy, { seed: Math.random() * 100 });
+      world.fx.spawn(H.fxFull, cx, cy, { seed: Math.random() * 100, maxSame: 1 });
     }
     world.shake(H.shake + k * 5);
     world.hitLag(H.hitstop + k * 0.04);

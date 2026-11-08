@@ -397,6 +397,12 @@ const SCRIPTS = {
     [180, 240, "right"], [240, 280, "heavy"], [270, 300, "heavy"],
     [300, 360, "left"],
   ],
+  // 反复蓄满：按住 40 帧（0.67s，超过 chargeMax 0.55s 会触发自动释放），松开 40 帧
+  spamheavy: Array.from({ length: 12 }, (_, i) => [
+    [i * 80, i * 80 + 40, "heavy"],
+  ]).flat(),
+  // 一直按住 K + 向右跑
+  holdheavy: [[0, 3600, "heavy"], [0, 3600, "right"]],
   run: [[0, 400, "right"]],
   combat: [
     [0, 70, "right"], [70, 90, "heavy"], [80, 100, "heavy"], [95, 120, "heavy"],
@@ -589,6 +595,8 @@ async function boot() {
       torches: game.level.torches.map((t) => ({ x: t.x, y: t.y })),
       coins: game.level.coins.filter((c) => !c.taken).map((c) => ({ x: c.x, y: c.y })),
       gotCoins: game.coins, totalCoins: game.coinTotal, fxCount: game.fx.count, exit: game.level.exit,
+      spawnCount: (typeof window !== "undefined" ? window.__spawnCount : null) ?? null,
+      liveIds: game.fx.live.reduce((acc, e) => { acc[e.id] = (acc[e.id] || 0) + 1; return acc; }, {}),
     };
     info.textContent = `headless: ${hf} 帧，特效 ${game.fx.count}, 玩家 ${p.state}`;
     document.title = "S " + JSON.stringify({ script, px: meta.px, py: meta.py, state: p.state, coins: game.coins });

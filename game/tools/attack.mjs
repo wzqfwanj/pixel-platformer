@@ -258,6 +258,59 @@ console.log("\n[5.6] ground-slam 自带地形变红和石头飞溅");
 
 
 
+// ---------------------------------------------------------------- 5.7 连续蓄满不退化
+console.log("\n[5.7] 连续蓄满 10 次，ground-slam 每次都要有");
+{
+  const { world, p, idle } = makeWorld();
+  const slamsPerRound = [];
+  const livePerRound = [];
+
+  for (let round = 0; round < 10; round++) {
+    // 等到空闲再蓄力
+    for (let i = 0; i < 200 && (p.slash || p.charging || p.state === "attack"); i++) {
+      p.update(DT, idle, world);
+    }
+    world.spawned.length = 0;
+
+    p.startCharge(world);
+    const hold = holdHeavy(false);
+    for (let i = 0; i < 60; i++) {
+      p.update(DT, hold, world);
+      if (!p.charging) break;
+    }
+    // 推进到爆炸
+    let guard = 0;
+    while (p.slash && p.slash.phase === "windup" && guard++ < 30) p.update(DT, idle, world);
+    p.update(DT, idle, world);
+
+    slamsPerRound.push(world.spawned.filter((s) => s === "impacts/ground-slam").length);
+    livePerRound.push(world.liveSameMax ?? 0);
+    // 让特效走完，避免下一轮堆积
+    for (let i = 0; i < 40; i++) p.update(DT, idle, world);
+  }
+
+  console.log("  每轮 ground-slam 次数: " + slamsPerRound.join(","));
+  const allOne = slamsPerRound.every((n) => n === 1);
+  ok(allOne, "连续 10 次蓄满，每次都放 ground-slam", slamsPerRound.join(","));
+
+  // 同类特效并发上限（用干净的 FxLayer，避免受前面用例影响）
+  const { FxLayer: FL } = await import("../fx/fxlayer.js");
+  const fx2 = new FL();
+  await fx2.preload();
+  let peak = 0;
+  // 按真实节奏：每次蓄满间隔约 1 秒，期间正常推进（淡出的会消失）
+  for (let k = 0; k < 12; k++) {
+    fx2.spawn("impacts/ground-slam", 104, 256, { seed: k, maxSame: 1 });
+    for (let f = 0; f < 60; f++) {
+      fx2.update(1 / 60, { x: 0, y: 128 });
+      peak = Math.max(peak, fx2.live.filter((e) => e.id === "impacts/ground-slam").length);
+    }
+  }
+  const live = fx2.live.filter((e) => e.id === "impacts/ground-slam").length;
+  console.log("  连续放 12 个 ground-slam 后，同时存活 " + live + " 个（峰值 " + peak + "）");
+  ok(peak <= 2, "同类大特效不会无限堆积（maxSame 生效）", "峰值 " + peak);
+}
+
 // ---------------------------------------------------------------- 6. 轻点 vs 蓄满
 console.log("\n[6] 轻点和蓄满的差别");
 {

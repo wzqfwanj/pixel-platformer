@@ -99,8 +99,23 @@ export class FxLayer {
       x: ox,
       y: oy,
     };
+    // 临时埋点：统计 spawn 次数，排查"连续蓄满后特效消失"
+    if (typeof window !== "undefined") {
+      window.__spawnCount = window.__spawnCount || {};
+      window.__spawnCount[id] = (window.__spawnCount[id] || 0) + 1;
+    }
+    // 同类特效并发上限：新的进来时把最旧的收掉。
+    // 关键：ground-slam 这种大特效叠 3 层会让单帧涨到 10ms，帧率一掉，
+    // 视觉上大红闪就变得一顿一顿，像"特效没出现"。
+    const maxSame = opts.maxSame ?? 2;
+    const same = this.live.filter((e) => e.id === id && !e.stopping);
+    for (let i = 0; i <= same.length - maxSame; i++) {
+      same[i].fx.stop();
+      same[i].stopping = true;
+    }
+
     const fx = createFx(mod, o);
-    const inst = { id, fx, mod, frame, ox, oy, x, y, lift: opts.lift ?? 1, sticky: !!opts.sticky, dead: false };
+    const inst = { id, fx, mod, frame, ox, oy, x, y, lift: opts.lift ?? 1, sticky: !!opts.sticky, dead: false, stopping: false };
     this.live.push(inst);
     return inst;
   }
