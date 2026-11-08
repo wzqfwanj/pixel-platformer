@@ -14,6 +14,7 @@ import { Warrior } from "./entities/warrior.js";
 import { Enemy } from "./entities/enemy.js";
 import { FxLayer, WARRIOR_PALETTE } from "./fx/fxlayer.js";
 import { DebrisSystem } from "./fx/debris.js";
+import { StartMenu } from "./ui/startmenu.js";
 import { drawHud } from "./ui/hud.js";
 import { collectCoins } from "./world/pickups.js";
 import { Spawner } from "./world/spawner.js";
@@ -62,6 +63,8 @@ const game = {
   comboTimer: 0,
   won: false,
   mode: "level",     // "level" 关卡模式 | "endless" 无尽模式
+  menu: null,        // 启动菜单（非 null 时游戏暂停）
+  scene: "menu",     // "menu" 选模式 | "playing" 游戏中
   spawner: null,
   surviveTime: 0,
   waveText: "",
@@ -184,6 +187,21 @@ function reset(mode = game.mode) {
 // ---------------- 每帧逻辑
 function update(dt) {
   const input = game.input;
+
+  // ---- 启动菜单：选模式期间不推进游戏
+  if (game.scene === "menu") {
+    game.time += dt;
+    if (input.pressed("debug")) game.debug = !game.debug;
+    if (input.pressed("theme")) cycleTheme();
+    const picked = game.menu.update(dt, input);
+    if (picked) {
+      game.scene = "playing";
+      game.menu = null;
+      reset(picked);
+    }
+    return;
+  }
+
   game.time += dt;
   game.comboTimer = Math.max(0, game.comboTimer - dt);
   if (game.comboTimer <= 0) game.combo = 0;
@@ -192,8 +210,10 @@ function update(dt) {
   if (input.pressed("restart")) { reset(); return; }
   if (input.pressed("debug")) game.debug = !game.debug;
   if (input.pressed("theme")) cycleTheme();
+  // M：回菜单重新选模式
   if (input.pressed("mode")) {
-    reset(game.mode === "endless" ? "level" : "endless");
+    game.scene = "menu";
+    game.menu = new StartMenu();
     return;
   }
 
@@ -297,9 +317,24 @@ function advance(realDt) {
 function render(scratch) {
   const s = scratch;
   const colors = getThemeColors();
-  
+
   s.clearLight();
   s.clear(colors.bg);
+
+  // ---- 启动菜单：只画菜单，不画游戏世界
+  if (game.scene === "menu") {
+    // 背后垫一层静态的场景，别让菜单浮在纯色上
+    if (game.level) {
+      const cam0 = { x: 0, y: Math.max(0, game.level.pxH - H) };
+      blitRect(game.sky, s, 0, 0, W, H, 0, 0);
+      const off0 = Math.round((cam0.x * 0.28) % PARALLAX_W);
+      for (let i = -1; i <= 1; i++) blitRect(game.hills, s, 0, 0, PARALLAX_W, H, i * PARALLAX_W - off0, 0);
+      blitRect(game.baked, s, cam0.x, cam0.y, W, H, 0, 0);
+    }
+    game.menu.draw(s);
+    s.composite(scratch.out);
+    return;
+  }
 
   const cam = renderCamera(game.cam, game.shakeAmt);
 
@@ -501,14 +536,53 @@ async function boot() {
   game.sky = bakeSky(W, H);
   game.hills = bakeHills(PARALLAX_W, H);
 
-  // URL 参数可以指定模式：?mode=endless
+  // URL 参数：
+  //   ?mode=level|endless  指定模式
+  //   ?menu=1              强制显示启动菜单（默认就显示）
+  //   ?frames=N            无头验证，直接进游戏跑帧
   const bootParams = new URLSearchParams(location.search);
   const bootMode = bootParams.get("mode") === "endless" ? "endless" : "level";
+  const headless = Number(bootParams.get("frames") || 0) > 0;
+
+  // 先把关卡数据准备好（菜单背景要用）
   reset(bootMode);
+
+  // 菜单显示规则（优先级从高到低）：
+  //   ?menu=1  一定显示菜单（截图/调试用）
+  //   ?menu=0  一定跳过
+  //   ?frames= 无头验证，默认跳过
+  //   其他     正常启动，显示菜单
+  const menuParam = bootParams.get("menu");
+  const skipMenu = menuParam === "1" ? false : (menuParam === "0" || headless);
+  if (skipMenu) {
+    game.scene = "playing";
+    game.menu = null;
+  } else {
+    game.scene = "menu";
+    game.menu = new StartMenu();
+  }
 
   // 无人看管的验证模式：跑 N 帧，把画布和状态交给本地服务器落盘
   const params = new URLSearchParams(location.search);
   const hf = Number(params.get("frames") || 0);
+  if (hf > 0 && game.scene === "menu") {
+    // 只是要看菜单：渲染一帧就够
+    render(buf);
+    ctx.putImageData(img, 0, 0);
+    info.textContent = "菜单";
+    // 同时写进 DOM 属性，无头 --dump-dom 能直接取到
+    document.documentElement.dataset.shot = canvas.toDataURL("image/png");
+    const postBase = new URL("../", location.href);
+    fetch(new URL("__shot", postBase), { method: "POST", body: canvas.toDataURL("image/png") })
+      .then((r) => r.text())
+      .then((t) => console.log("shot: " + t))
+      .catch(() => {});
+    const menuMeta = { scene: "menu", menuIndex: game.menu?.index, menuSelected: game.menu?.selected };
+    document.documentElement.dataset.meta = JSON.stringify(menuMeta);
+    fetch(new URL("__meta", postBase), { method: "POST", body: JSON.stringify(menuMeta) }).catch(() => {});
+    return;
+  }
+
   if (hf > 0) {
     const script = params.get("script") || "combat";
     runHeadless(hf, script);

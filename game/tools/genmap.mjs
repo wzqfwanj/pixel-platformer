@@ -45,7 +45,7 @@ while (x < W - 34) {
   const roll = r();
 
   if (roll < 0.24) {
-    // 坑：直接空过去，上方一串金币画出跳跃弧线
+    // 坑：直接空过去，上方一串金币画出跳跃弧线（高度取 GROUND-2，跳过去顺手吃到）
     const gap = range(2, MAX_GAP);
     cols(x, gap, 99);
     segments.push(["pit", x, gap]);
@@ -123,16 +123,31 @@ for (let cx = 8; cx < W - 8; cx++) {
   lastTorch = cx;
 }
 
-// ---- 金币：坑上方弧线、台地上
+// ---- 金币：坑上方弧线、台地上、平地
+// 平地上的金币放在 GROUND-1（贴着地面），走过去就能吃到 ——
+// 这是玩家最容易遇到、也最该"正常计数"的那类。
 for (const s of segments) {
   if (s[0] === "pit") {
     const [, px, gap] = s;
-    for (let i = 0; i < gap; i++) set(px + i, GROUND - 4, "C");
+    for (let i = 0; i < gap; i++) set(px + i, GROUND - 2, "C");
   }
   if (s[0] === "plateau") {
     const [, px, len, ly] = s;
     set(px + Math.floor(len / 2), ly - 2, "C");
   }
+}
+
+// ---- 贴地金币：沿主地面每隔一段放一枚
+// 之前所有金币都挂在空中（离地 28~60px），站着一枚也吃不到，
+// 玩家会以为"金币计数坏了"。这里补一批贴地金币，跑过去就能捡。
+let lastGroundCoin = -99;
+for (let cx = 18; cx < W - 18; cx++) {
+  if (cx - lastGroundCoin < 21) continue;
+  // 主地面：GROUND 这一行是实心，上面一格空着
+  if (get(cx, GROUND) !== "#" || get(cx, GROUND - 1) !== ".") continue;
+  if (get(cx, GROUND - 2) !== ".") continue;
+  set(cx, GROUND - 1, "C");
+  lastGroundCoin = cx;
 }
 
 // ---- 木桩靶与史莱姆：都站在主地面上，互相错开

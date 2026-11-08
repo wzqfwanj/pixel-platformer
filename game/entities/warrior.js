@@ -175,9 +175,12 @@ export class Warrior {
     world.shake(H.shake + k * 5);
     world.hitLag(H.hitstop + k * 0.04);
 
-    // ---- 碎石飞溅：这是蓄满最直观的反馈
-    const count = Math.round(H.debrisBase + H.debrisPerCharge * k);
-    world.debris?.burst(cx, cy, count, k);
+    // ---- 碎石飞溅：只有蓄满才掀石头。
+    // 碎石是"满蓄"的专属奖励，也是玩家判断"该松手了"的最直观信号。
+    if (full) {
+      const count = Math.round(H.debrisBase + H.debrisPerCharge * k);
+      world.debris?.burst(cx, cy, count, k);
+    }
 
     // ---- 范围伤害：圆内所有敌人
     let hitCount = 0;

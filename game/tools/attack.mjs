@@ -195,7 +195,7 @@ console.log("\n[5] 越靠近爆心伤害越高");
 }
 
 // ---------------------------------------------------------------- 5.5 碎石飞溅
-console.log("\n[5.5] 蓄满爆炸掀起碎石");
+console.log("\n[5.5] 碎石只在蓄满时出现");
 {
   const countDebris = (k) => {
     const { world, p, idle, tick } = makeWorld();
@@ -209,14 +209,14 @@ console.log("\n[5.5] 蓄满爆炸掀起碎石");
   };
 
   const light = countDebris(0.2);
+  const half = countDebris(0.6);
   const full = countDebris(1.0);
-  console.log(`  轻蓄 ${light} 块碎石，蓄满 ${full} 块`);
-  ok(light > 0, "轻蓄也有碎石", `${light}`);
-  ok(full > light, "蓄满碎石更多（最高伤害的反馈）", `${full} vs ${light}`);
-  ok(full >= 20, "蓄满碎石量够多，视觉上有冲击", `${full} 块`);
+  console.log(`  轻蓄 ${light} 块，半蓄 ${half} 块，蓄满 ${full} 块`);
+  ok(light === 0, "轻蓄没有碎石（碎石是满蓄专属）", `${light}`);
+  ok(half === 0, "半蓄也没有碎石", `${half}`);
+  ok(full >= 20, "蓄满才掀起碎石，而且量足够多", `${full} 块`);
 }
 
-// ---------------------------------------------------------------- 5.6 碎石物理
 console.log("\n[5.6] 碎石有独立物理（会飞、会落地）");
 {
   const { world, p, idle, tick } = makeWorld();

@@ -408,5 +408,19 @@ world.player = player;
   }
 }
 
+// ---- 18. 启动菜单（进入游戏前选模式）
+{
+  const { execFileSync } = await import("node:child_process");
+  const menuPath = fileURLToPath(new URL("./menu.mjs", import.meta.url));
+  try {
+    const out = execFileSync(process.execPath, [menuPath], { encoding: "utf8" });
+    const line = out.split("\n").find((l) => l.includes("默认选中")) ?? "";
+    ok(out.includes("全部通过"), "启动菜单（menu.mjs）", line.trim());
+  } catch (e) {
+    const bad = ((e.stdout ?? "") + (e.stderr ?? "")).split("\n").filter((l) => l.includes("FAIL"));
+    ok(false, "启动菜单（menu.mjs）", bad.join(" | ").slice(0, 200));
+  }
+}
+
 console.log(fails ? `\n${fails} 项失败` : "\n全部通过");
 process.exit(fails ? 1 : 0);
