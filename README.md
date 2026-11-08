@@ -1,9 +1,7 @@
-# second run / 说明
-
-## 这套东西是什么
+# 像素闯关 demo · 战士
 
 一套横板像素闯关 demo，战士职业，一关。前端纯 HTML/CSS/JS 零依赖，
-渲染是手写的软件光栅化（Uint32 颜色缓冲 + 叠加光照缓冲），后两端 Python 标准库。
+渲染是手写的软件光栅化（Uint32 颜色缓冲 + 叠加光照缓冲），后端 Python 标准库。
 
 ## 在线玩
 
@@ -54,5 +52,5 @@ node game/tools/bench.mjs         # 性能基准
 ## 致谢
 
 - 特效库：[patch-gg/pixelfx](https://github.com/patch-gg/pixelfx) by Patch，MIT
-- 方法来源：Hugo Duprez《How to make (good) pixel art effects with Claude》
-- 像素字体：pixelfx 自带的 3x5 / 5x7 字体
+- 方法来源：Hugo Duprez《How to make (good) pixel-art effects with Claude》
+- 像素字体：pixelfx 自带的 3x5 / 5x7 位图字体
