@@ -483,6 +483,100 @@ console.log("\n[5.9] 蓄满爆炸的可见时间（之前只有 1.3 秒，感觉
   ok(seconds > 2.5, "可见时间超过 2.5 秒（不再\"放一下就没了\"）", seconds.toFixed(2) + "s");
 }
 
+// ---------------------------------------------------------------- 5.10 按键不会被吞
+console.log("\n[5.10] 在爆炸动作 / hitLag 期间按 K 不能被吞掉");
+{
+  // 真凶："按 K 开始蓄力"原本在第 333 行，前面有 5 个提前 return
+  //（死亡 / 受伤 / 蓄力中 / 爆炸动作 0.49s / 冲刺）。
+  // 玩家在爆炸动作期间点按 K 会被完全忽略，看起来就是"只能释放一次"。
+  // 更糟的是 hitLag（命中定帧）期间整个 player.update 被跳过，
+  // input.endFrame() 又把 just 清掉 —— 那一帧的按键彻底消失。
+  //
+  // 修法：重攻击输入缓冲（0.6 秒），并且记录位置提到 main 的 hitLag 判断之前。
+
+  const { FxLayer } = await import("../fx/fxlayer.js");
+  const { ScorchLayer } = await import("../fx/scorch.js");
+  const fl = new FxLayer();
+  await fl.preload();
+  const scorch = new ScorchLayer();
+  const lvl = new Level();
+  const p = new Warrior(lvl.spawn.x, lvl.spawn.y);
+  let hitLagT = 0;
+  const w = {
+    level: lvl, fx: fl, scorch, enemies: [], player: p,
+    shake() {}, hitLag(x) { hitLagT = Math.max(hitLagT, x); },
+    onHit() {}, onEnemyKilled() {}, respawnPlayer() {},
+  };
+  const idl = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+  for (let i = 0; i < 20; i++) p.update(DT, idl, w);
+
+  const input = {
+    down: new Set(), just: new Set(), rel: new Set(),
+    held(a) { return this.down.has(a); },
+    pressed(a) { return this.just.has(a); },
+    letGo(a) { return this.rel.has(a); },
+    axis() { return 0; },
+    set(want) {
+      this.just.clear(); this.rel.clear();
+      for (const k of want) if (!this.down.has(k)) this.just.add(k);
+      for (const k of this.down) if (!want.has(k)) this.rel.add(k);
+      this.down = new Set(want);
+    },
+    endFrame() { this.just.clear(); this.rel.clear(); },
+  };
+
+  // 复刻 main.js 的 update 顺序（缓冲记录在 hitLag 之前）
+  const step = (held) => {
+    input.set(held ? new Set(["heavy"]) : new Set());
+    if (input.pressed("heavy")) p.heavyBuffer = 0.6;   // main 里做的
+    if (hitLagT > 0) {
+      hitLagT -= DT;
+      fl.update(DT * 0.12, { x: 0, y: 128 });
+      scorch.update(DT * 0.12);
+      input.endFrame();
+      return false;
+    }
+    p.update(DT, input, w);
+    fl.update(DT, { x: 0, y: 128 });
+    scorch.update(DT);
+    input.endFrame();
+    return true;
+  };
+
+  // 场景：第 0-33 帧按住（蓄满释放），第 40-42 帧在 slash/hitLag 期间再点一次
+  let releases = 0, lastSlash = null, presses = 0;
+  for (let f = 0; f < 300; f++) {
+    const held = f < 33 || (f >= 40 && f < 42);
+    if (held && !input.down.has("heavy")) presses++;
+    step(held);
+    if (p.slash && !lastSlash) releases++;
+    lastSlash = p.slash;
+  }
+  console.log("  按 K " + presses + " 次 → 释放 " + releases + " 次");
+  ok(presses >= 2, "测试确实按了 2 次以上", String(presses));
+  ok(releases >= presses, "每次按键都换来了释放（一个都没吞）", releases + "/" + presses);
+
+  // 再测：极快点按（每 8 帧一下）
+  const p2 = new Warrior(lvl.spawn.x, lvl.spawn.y);
+  const w2 = { ...w, player: p2 };
+  hitLagT = 0;
+  for (let i = 0; i < 20; i++) p2.update(DT, idl, w2);
+  let r2 = 0, pv = 0, last2 = null;
+  for (let f = 0; f < 300; f++) {
+    const held = f % 8 === 0;
+    if (held && !input.down.has("heavy")) pv++;
+    input.set(held ? new Set(["heavy"]) : new Set());
+    if (input.pressed("heavy")) p2.heavyBuffer = 0.6;
+    if (hitLagT > 0) { hitLagT -= DT; input.endFrame(); continue; }
+    p2.update(DT, input, w2);
+    input.endFrame();
+    if (p2.slash && !last2) r2++;
+    last2 = p2.slash;
+  }
+  console.log("  极快连点：按 K " + pv + " 次 → 释放 " + r2 + " 次");
+  ok(r2 >= 5, "极快连点也能连续释放", r2 + " 次");
+}
+
 // ---------------------------------------------------------------- 6. 轻点 vs 蓄满
 console.log("\n[6] 轻点和蓄满的差别");
 {

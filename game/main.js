@@ -228,6 +228,12 @@ function update(dt) {
     return;
   }
 
+  // ---- 重攻击输入缓冲：必须在 hitLag / won 等提前 return 之前记录，
+  // 否则这些帧里按下的 K 会被 endFrame 清掉，玩家感觉"按键没反应"。
+  if (game.player && input.pressed("heavy")) {
+    game.player.heavyBuffer = 0.6;
+  }
+
   // ---- 兜底：蓄力已满却迟迟没释放，强制放出来
   // 正常情况下 warrior.update 里 charge 到顶就 releaseCharge。
   // 但如果这一帧被 hitLag 跳过、或者处于受伤/死亡等提前 return 的分支，

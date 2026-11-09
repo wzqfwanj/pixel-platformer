@@ -88,6 +88,10 @@ export class Warrior {
     this.queued = false;
     this.charging = false;
     this.charge = 0;
+    // 重攻击输入缓冲：在爆炸动作 / 受伤 / 冲刺期间按下的 K 会存着，
+    // 等状态一结束立刻生效。没有它的话，玩家在动作 0.49 秒内点按会被完全吞掉
+    // —— 看起来就是"只能释放一次"。
+    this.heavyBuffer = 0;
     this.chargeFx = null;
     this.slash = null;    // 蓄力斩动作 { t, phase, k, hits }
     this.charge = 0;
@@ -256,6 +260,11 @@ export class Warrior {
     if (input.pressed("jump")) this.buffer = this.cfg.jumpBuffer;
     this.buffer = Math.max(0, this.buffer - dt);
 
+    // 重攻击输入缓冲：只要按下就记 0.3 秒，不管当时能不能起手
+    // 缓冲要覆盖整个爆炸动作（0.49 秒），否则动作期间按下的键会白按
+    if (input.pressed("heavy")) this.heavyBuffer = 0.6;
+    this.heavyBuffer = Math.max(0, this.heavyBuffer - dt);
+
     // ---- 受伤硬直
     if (this.state === "hurt") {
       this.hurtT -= dt;
@@ -299,6 +308,13 @@ export class Warrior {
       if (finished) {
         this.slash = null;
         this.state = this.onGround ? "idle" : "fall";
+        // 动作刚结束：如果缓冲里还记着按了 K（玩家在动作期间点过），立刻起下一次蓄力
+        if (this.heavyBuffer > 0 || input.held("heavy")) {
+          this.heavyBuffer = 0;
+          this.startCharge(world);
+          this.physics(dt, L);
+          return;
+        }
       }
 
       this.vx = approach(this.vx, 0, this.cfg.accel * dragging * dt);
@@ -330,7 +346,8 @@ export class Warrior {
     }
     // 按下或【持续按住】都能起蓄力：
     // 受击会打断蓄力，如果只认按下，玩家按住 K 时会永远卡在"没在蓄力"的状态。
-    if ((input.pressed("heavy") || input.held("heavy")) && !this.charging && !this.slash) {
+    if ((this.heavyBuffer > 0 || input.held("heavy")) && !this.charging && !this.slash) {
+      this.heavyBuffer = 0;
       this.startCharge(world);
       return;
     }
