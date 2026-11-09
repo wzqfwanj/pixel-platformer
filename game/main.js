@@ -51,6 +51,7 @@ const game = {
   cam: { x: 0, y: 0 },
   shakeAmt: 0,
   hitLagT: 0,
+  releaseCount: 0,   // 蓄力释放次数（调试用，确认"每次都释放"）
   time: 0,
   fps: 60,
   coins: 0,
@@ -115,6 +116,16 @@ game.respawnPlayer = () => {
   p.invuln = 1.2;
   game.shake(4);
 };
+
+/** 清掉玩家身上的攻击态（通关 / 死亡 / 回菜单时调用） */
+function clearPlayerAttack(pl) {
+  if (!pl) return;
+  pl.charging = false;
+  pl.charge = 0;
+  pl._fullFrames = 0;
+  if (pl.chargeFx) { pl.chargeFx.fx.stop(); pl.chargeFx = null; }
+  // slash 不强制清：让它自己走完，否则特效会被截断
+}
 
 // ---------------- 主题
 function cycleTheme() {
@@ -295,6 +306,8 @@ function update(dt) {
     if (p.state === "dead" && !game.won) {
       game.won = true;
       game.showHint = false;
+      // 清掉残留的蓄力/爆炸状态，避免通关或死亡后蓄力条卡住
+      clearPlayerAttack(p);
       game.fx.spawn("ui/level-up", p.cx, p.cy - 10, { seed: 5 });
       game.shake(6);
     }
@@ -308,10 +321,16 @@ function update(dt) {
   if (!game.won && Math.abs(p.cx - ex.x) < 14 && Math.abs(p.feet - ex.y) < 40) {
     game.won = true;
     game.showHint = false;
+    // 清掉残留的蓄力/爆炸状态，避免通关或死亡后蓄力条卡住
+    clearPlayerAttack(p);
     game.fx.spawn("ui/level-up", ex.x, ex.y - 24, { seed: 12 });
     game.fx.spawn("fire/flame-pillar", ex.x, ex.y, { seed: 7 });
     game.shake(5);
   }
+
+  // 统计蓄力释放次数（slash 从无到有算一次）
+  if (p.slash && !game.lastSlashSeen) game.releaseCount++;
+  game.lastSlashSeen = p.slash;
 
   followCamera(game.cam, p, game.level);
   game.fx.update(dt, game.cam);

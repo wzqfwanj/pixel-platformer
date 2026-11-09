@@ -4,6 +4,7 @@
 import { hex } from "../core/util.js";
 import { drawText } from "../core/text.js";
 import { getTheme } from "../core/theme.js";
+import { BUILD } from "../core/build.js";
 import { drawMinimap } from "./minimap.js";
 
 /** 把主题里的 #rrggbb 转成缓冲区用的颜色整数，顺手缓存（主题切换时重建） */
@@ -92,6 +93,9 @@ export function drawHud(s, game) {
     drawText(s, `BEST x${game.comboBest}`, 12, 23, C.dim, { shadow: sh });
   }
 
+  // ---- 左下角构建标记（排查"改了没生效"用）
+  drawText(s, BUILD.hash, 2, 174, C.dim);
+
   // ---- 底部操作提示
   if (game.showHint) {
     const hint = "A D MOVE   SPACE JUMP   HOLD K CHARGE SLASH   SHIFT DASH   T THEME   M MODE";
@@ -108,6 +112,7 @@ export function drawHud(s, game) {
       `POS ${p.cx.toFixed(0)},${p.feet.toFixed(0)}  VX ${p.vx.toFixed(0)} VY ${p.vy.toFixed(0)}  HP ${p.hp.toFixed(0)}`,
       `STATE ${p.state}  GROUND ${p.onGround ? 1 : 0}  SLASH ${p.slash ? p.slash.phase : "-"}`,
       `CHARGING ${p.charging ? 1 : 0}  CHARGE ${p.charge.toFixed(2)}/${maxC}  FULL ${p.charge >= maxC - 1e-6 ? 1 : 0}`,
+      `RELEASED ${game.releaseCount ?? 0} TIMES  BUILD ${BUILD.label}`,
     ];
     lines.forEach((l, i) => drawText(s, l, 6, 30 + i * 7, C.accent, { shadow: sh }));
   }
