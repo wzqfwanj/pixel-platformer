@@ -250,6 +250,23 @@ export class Warrior {
     }
 
     const L = world.level;
+
+    // ---- 掉出地图：必须在所有提前 return 之前检查！
+    // 否则蓄力/爆炸动作/冲刺/攻击期间掉坑会一直往下掉，永远拉不回来
+    if (this.y > L.pxH + 40) {
+      this.takeDamage(15, this.cx, world);
+      this.x = this.safe.x - this.w / 2;
+      this.y = this.safe.y - this.h;
+      this.vx = 0;
+      this.vy = 0;
+      this.invuln = 0.9;
+      this.charging = false;
+      this.charge = 0;
+      this.slash = null;
+      world.shake(3);
+      return;
+    }
+
     const dir = input.axis();
     // 攻击中不转身（挥砍朝向锁定到这一段结束），只允许在起手前/后摇末尾调整
     const canTurn = this.state !== "hurt" && !this.slash;
@@ -385,16 +402,6 @@ export class Warrior {
     }
 
     this.checkHazards(world);
-
-    // 掉出地图
-    if (this.y > L.pxH + 40) {
-      this.takeDamage(15, this.cx, world);
-      this.x = this.safe.x - this.w / 2;
-      this.y = this.safe.y - this.h;
-      this.vx = 0; this.vy = 0;
-      this.invuln = 0.9;
-      world.shake(3);
-    }
   }
 
   physics(dt, L, ignoreGravity = false) {
@@ -414,14 +421,32 @@ export class Warrior {
     let guard0 = 0;
     while (L.solidRect(this.x, this.y, this.w, this.h) && guard0++ < 40) this.y -= 1;
 
-    // ---- 横向
+    // ---- 横向（带自动跨台阶）
     const nx = this.x + this.vx * dt;
-    if (!L.solidRect(nx, this.y, this.w, this.h)) this.x = nx;
-    else {
-      const T = L.T;
-      if (this.vx > 0) this.x = Math.floor((this.x + this.w) / T) * T - this.w;
-      else if (this.vx < 0) this.x = (Math.floor(this.x / T) + 1) * T;
-      this.vx = 0;
+    if (!L.solidRect(nx, this.y, this.w, this.h)) {
+      this.x = nx;
+    } else {
+      const T = L.T, step = Math.sign(this.vx);
+      let stepped = false;
+
+      // 试试"抬高一格再走"（只在贴地时试，空中不自动爬）
+      if (this.onGround && step !== 0) {
+        const lift = T;      // 一格 = 16px
+        const upY = this.y - lift;
+        if (!L.solidRect(this.x, upY, this.w, this.h) && !L.solidRect(nx, upY, this.w, this.h)) {
+          // 抬起来能过：直接挪上去，同时保留一点前进速度
+          this.y = upY;
+          this.x = nx;
+          stepped = true;
+        }
+      }
+
+      if (!stepped) {
+        // 贴住墙面
+        if (this.vx > 0) this.x = Math.floor((this.x + this.w) / T) * T - this.w;
+        else if (this.vx < 0) this.x = (Math.floor(this.x / T) + 1) * T;
+        this.vx = 0;
+      }
     }
 
     // ---- 纵向

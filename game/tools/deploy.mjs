@@ -23,8 +23,9 @@ const run = (cmd, opts = {}) => execSync(cmd, { stdio: "inherit", cwd: ROOT, ...
 console.log("== 1. 更新构建标记 ==");
 run("node game/tools/gen-build.mjs");
 const build = readFileSync(join(GAME, "core/build.js"), "utf8");
+const buildId = (build.match(/id: "([^"]+)"/) || [])[1];
 const hash = (build.match(/hash: "([^"]+)"/) || [])[1];
-console.log("   build = " + hash);
+console.log("   build = " + buildId + " (" + hash + ")");
 
 console.log("\n== 2. 打包 ==");
 rmSync(join(ROOT, "deploy.tgz"), { force: true });
@@ -44,9 +45,9 @@ run(
 console.log("\n== 4. 验证线上 build ==");
 try {
   const body = execSync('curl.exe -s --noproxy "*" --max-time 20 "' + BASE + 'core/build.js"', { encoding: "utf8" });
-  const liveHash = (body.match(/hash: "([^"]+)"/) || [])[1];
-  console.log("   线上 = " + liveHash);
-  console.log(liveHash === hash ? "   部署已生效" : "   ! 线上和本地不一致，可能被缓存");
+  const liveId = (body.match(/id: "([^"]+)"/) || [])[1];
+  console.log("   线上 = " + liveId);
+  console.log(liveId === buildId ? "   部署已生效（id 一致）" : "   ! 线上 id 不匹配，可能被缓存");
 } catch (e) {
   console.log("   拉取失败: " + e.message);
 }

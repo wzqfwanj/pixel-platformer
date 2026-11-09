@@ -422,5 +422,79 @@ world.player = player;
   }
 }
 
+// ---- 19. 移动能力：自动跨 1 格台阶（曾经卡死在 x≈412）
+{
+  const lv19 = new Level();
+  const w19 = { level: lv19, fx: new FxLayer(), enemies: [], player: null, shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {} };
+  const pp = new Warrior(lv19.spawn.x, lv19.spawn.y);
+  w19.player = pp;
+  const inp = {
+    down: new Set(["right"]), just: new Set(),
+    held(a) { return this.down.has(a); },
+    pressed(a) { return this.just.has(a); },
+    letGo: () => false,
+    axis() { return 1; },
+    endFrame() { this.just.clear(); },
+  };
+  for (let i = 0; i < 20; i++) pp.update(1 / 60, inp, w19);
+
+  // 一路向右跑 30 秒，记录最久连续不动
+  let lastX = pp.x, stuck = 0, worstStuck = 0, worstX = 0;
+  const startX = pp.x;
+  let jumpHold = 0;
+  for (let i = 0; i < 60 * 30; i++) {
+    // 正常玩家行为：前方没地面、或被挡住，就跳
+    const aheadX = pp.cx + 14;
+    const pitAhead = !lv19.solidAt(aheadX, pp.feet + 6) && !lv19.solidAt(aheadX, pp.feet + 22);
+    const wallAhead = lv19.solidAt(pp.cx + pp.w / 2 + 4, pp.feet - 8);
+    if (pp.onGround && jumpHold <= 0 && (pitAhead || wallAhead || (Math.abs(pp.vx) < 3 && i > 10))) {
+      inp.just.add("jump");
+      jumpHold = 14;
+    }
+    if (jumpHold > 0 && --jumpHold === 0) inp.down.delete("jump");
+    else if (jumpHold > 0) inp.down.add("jump");
+    pp.update(1 / 60, inp, w19);
+    inp.endFrame();
+    if (Math.abs(pp.x - lastX) < 0.05) {
+      stuck++;
+      if (stuck > worstStuck) { worstStuck = stuck; worstX = pp.x; }
+    } else stuck = 0;
+    lastX = pp.x;
+  }
+  const dist = pp.x - startX;
+  ok(dist > 1200, "30 秒内能推进足够远（没被台阶卡死）", `推进 ${dist.toFixed(0)}px，终点 x=${pp.x.toFixed(0)}`);
+  ok(worstStuck < 90, "没有长时间原地不动", `最久停滞 ${worstStuck} 帧 @x=${worstX.toFixed(0)}`);
+}
+
+// ---- 20. 蓄力/攻击状态下掉进坑，也会被拉回来（曾经无限下坠）
+{
+  const lv20 = new Level();
+  const w20 = { level: lv20, fx: new FxLayer(), enemies: [], player: null, shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {} };
+  const q = new Warrior(lv20.spawn.x, lv20.spawn.y);
+  w20.player = q;
+  q.safe = { x: lv20.spawn.x, y: lv20.spawn.y };
+  const inp20 = {
+    down: new Set(["heavy"]), just: new Set(["heavy"]),
+    held: (a) => a === "heavy",
+    pressed: (a) => a === "heavy",
+    letGo: () => false,
+    axis: () => 0,
+    endFrame() { this.just.clear(); },
+  };
+  q.update(1 / 60, inp20, w20);
+  inp20.just.clear();
+  // 强行扔到地图下方（模拟蓄力时掉进坑）
+  q.y = lv20.pxH + 200;
+  let maxY = q.y;
+  for (let i = 0; i < 120; i++) {
+    q.update(1 / 60, inp20, w20);
+    maxY = Math.max(maxY, q.y);
+    inp20.endFrame();
+  }
+  ok(maxY < lv20.pxH + 400, "没有无限下坠", `最深处 y=${maxY.toFixed(0)}，地图高 ${lv20.pxH}`);
+  ok(Math.abs(q.y - (q.safe.y - q.h)) < 60, "被拉回安全点", `y=${q.y.toFixed(0)} 安全点=${(q.safe.y - q.h).toFixed(0)}`);
+  ok(!q.charging || q.charge < 0.9, "掉落时清掉了蓄力状态", `charging=${q.charging}`);
+}
+
 console.log(fails ? `\n${fails} 项失败` : "\n全部通过");
 process.exit(fails ? 1 : 0);

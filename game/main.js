@@ -456,7 +456,12 @@ const SCRIPTS = {
     [i * 80, i * 80 + 40, "heavy"],
   ]).flat(),
   // 一直按住 K + 向右跑
-  holdheavy: [[0, 3600, "heavy"], [0, 3600, "right"]],
+  // 按住 K + 向右推进，每 50 帧跳一次（跨过 2 格的坑）
+  holdheavy: Array.from({ length: 80 }, (_, i) => [
+    [i * 50, i * 50 + 50, "heavy"],
+    [i * 50, i * 50 + 50, "right"],
+    [i * 50 + 20, i * 50 + 34, "jump"],
+  ]).flat(),
   run: [[0, 400, "right"]],
   combat: [
     [0, 70, "right"], [70, 90, "heavy"], [80, 100, "heavy"], [95, 120, "heavy"],
