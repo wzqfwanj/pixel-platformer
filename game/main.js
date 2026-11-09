@@ -14,6 +14,7 @@ import { Warrior } from "./entities/warrior.js";
 import { Enemy } from "./entities/enemy.js";
 import { FxLayer, WARRIOR_PALETTE } from "./fx/fxlayer.js";
 import { StartMenu } from "./ui/startmenu.js";
+import { ScorchLayer } from "./fx/scorch.js";
 import { drawHud } from "./ui/hud.js";
 import { collectCoins } from "./world/pickups.js";
 import { Spawner } from "./world/spawner.js";
@@ -47,6 +48,7 @@ const game = {
   player: null,
   enemies: [],
   fx: new FxLayer(),
+  scorch: new ScorchLayer(),
   input: new Input(),
   cam: { x: 0, y: 0 },
   shakeAmt: 0,
@@ -186,6 +188,7 @@ function reset(mode = game.mode) {
   game.won = false;
   game.shakeAmt = 0;
   game.hitLagT = 0;
+  game.scorch.clear();
   for (const c of game.level.coins) { c.taken = false; c.played = false; }
   // 火把是常驻的循环特效
   for (const t of game.level.torches) game.fx.spawn("fire/torch", t.x, t.y + 2, { sticky: true, lift: 1.25 });
@@ -250,6 +253,7 @@ function update(dt) {
     // 命中定帧：世界几乎停住，只让特效慢慢走，打击感来源
     game.hitLagT -= dt;
     game.fx.update(dt * 0.12, game.cam);
+    game.scorch.update(dt * 0.12);
     return;
   }
 
@@ -313,6 +317,7 @@ function update(dt) {
     }
     followCamera(game.cam, p, game.level);
     game.fx.update(dt, game.cam);
+    game.scorch.update(dt);
     return;
   }
 
@@ -334,6 +339,7 @@ function update(dt) {
 
   followCamera(game.cam, p, game.level);
   game.fx.update(dt, game.cam);
+  game.scorch.update(dt);
 }
 
 /** 固定步长推进。每次 update 之后都要清掉"刚按下"标记，否则一帧内跑两次会重复触发。 */
@@ -394,6 +400,8 @@ function render(scratch) {
   }
 
   // 特效：角色后面那层
+  // 烧痕属于地面，画在关卡之后、特效之前
+  game.scorch.draw(s, cam);
   game.fx.drawBack(s, cam);
 
   for (const e of game.enemies) e.draw(s, cam);

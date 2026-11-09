@@ -181,6 +181,10 @@ export class Warrior {
     world.shake(H.shake + k * 5);
     world.hitLag(H.hitstop + k * 0.04);
 
+    // 地上留一块烧痕：ground-slam 的热度 0.8 秒就归零，
+    // 加这层余温后地面会持续泛红光，不会"放一下就没了"
+    world.scorch?.add(cx, cy, radius * 0.9, k, 4.0 + k * 2.0);
+
     // ---- 范围伤害：圆内所有敌人
     let hitCount = 0;
     for (const e of world.enemies) {

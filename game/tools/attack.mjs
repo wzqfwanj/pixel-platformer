@@ -406,6 +406,83 @@ console.log("\n[5.8] 地面上的对比度（之前的坑：尘土和地面同�
   ok(peak > 20, "地面被明显提亮（地形变红看得见）", "+" + peak.toFixed(0));
 }
 
+// ---------------------------------------------------------------- 5.9 特效有足够长的可见时间
+console.log("\n[5.9] 蓄满爆炸的可见时间（之前只有 1.3 秒，感觉\"放一下就没了\"）");
+{
+  // ground-slam 自身的 heat(t) 在 0.8 秒后归零，裂缝和火山口的红光全灭。
+  // 游戏层补了 ScorchLayer（地上留烧痕 + 余温光），把可见时间拉到 3 秒以上。
+  const { FxLayer: FL9 } = await import("../fx/fxlayer.js");
+  const { ScorchLayer } = await import("../fx/scorch.js");
+  const { Surface } = await import("../core/screen.js");
+  const { hex } = await import("../core/util.js");
+  const fx9 = new FL9();
+  await fx9.preload();
+  const scorch = new ScorchLayer();
+  const lvl9 = new Level();
+  const baked = lvl9.bake();
+  const pl = new Warrior(lvl9.spawn.x, lvl9.spawn.y);
+  const cam = { x: 0, y: 128 };
+  const w = {
+    level: lvl9, fx: fx9, scorch, enemies: [], player: pl,
+    shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {},
+  };
+  const idl = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+  for (let i = 0; i < 20; i++) pl.update(DT, idl, w);
+
+  const buf = new Surface(320, 180);
+  buf.out = new Uint8ClampedArray(320 * 180 * 4);
+  const lum = (r, g, b) => 0.3 * r + 0.6 * g + 0.1 * b;
+  const render = () => {
+    buf.clear(hex("#0b0812"));
+    buf.clearLight();
+    for (let y = 0; y < 180; y++)
+      for (let x = 0; x < 320; x++) {
+        const c = baked.color[(cam.y + y) * baked.w + (cam.x + x)];
+        if (c) buf.px(x, y, c);
+      }
+    scorch.draw(buf, cam);
+    fx9.drawBack(buf, cam);
+    pl.draw(buf, cam);
+    fx9.drawFront(buf, cam);
+  };
+  const groundLum = () => {
+    let s = 0, n = 0;
+    for (let y = 110; y < 175; y++)
+      for (let x = 100; x < 220; x++) {
+        const i = y * 320 + x, c = buf.color[i], l = buf.light;
+        s += lum(Math.min(255, (c & 255) + l[i * 3]),
+                 Math.min(255, ((c >>> 8) & 255) + l[i * 3 + 1]),
+                 Math.min(255, ((c >>> 16) & 255) + l[i * 3 + 2]));
+        n++;
+      }
+    return s / n;
+  };
+
+  render();
+  const base = groundLum();
+
+  pl.startCharge(w);
+  const hold = holdHeavy(false);
+  for (let i = 0; i < 60; i++) { if (!pl.charging) break; pl.update(DT, hold, w); }
+  pl.update(DT, holdHeavy(false, true), w);
+
+  let firstVisible = -1, lastVisible = -1;
+  for (let f = 0; f < 360; f++) {
+    pl.update(DT, idl, w);
+    fx9.update(DT, cam);
+    scorch.update(DT);
+    render();
+    if (groundLum() - base > 8) {
+      if (firstVisible < 0) firstVisible = f;
+      lastVisible = f;
+    }
+  }
+  const seconds = (lastVisible - firstVisible + 1) / 60;
+  console.log("  地面提亮 >8 的时段: " + (firstVisible / 60).toFixed(2) + "s .. " +
+    (lastVisible / 60).toFixed(2) + "s = " + seconds.toFixed(2) + " 秒");
+  ok(seconds > 2.5, "可见时间超过 2.5 秒（不再\"放一下就没了\"）", seconds.toFixed(2) + "s");
+}
+
 // ---------------------------------------------------------------- 6. 轻点 vs 蓄满
 console.log("\n[6] 轻点和蓄满的差别");
 {
