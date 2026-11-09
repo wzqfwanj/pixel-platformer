@@ -311,6 +311,101 @@ console.log("\n[5.7] 连续蓄满 10 次，ground-slam 每次都要有");
   ok(peak <= 2, "同类大特效不会无限堆积（maxSame 生效）", "峰值 " + peak);
 }
 
+// ---------------------------------------------------------------- 5.8 蓄满特效在地面上看得见
+console.log("\n[5.8] 地面上的对比度（之前的坑：尘土和地面同色，只有靠墙才看得见）");
+{
+  // 用干净的 FxLayer，避免前面用例残留的特效污染基准亮度
+  const { FxLayer: FL8 } = await import("../fx/fxlayer.js");
+  const fx8 = new FL8();
+  await fx8.preload();
+  const lvl8 = new Level();
+  const p = new Warrior(lvl8.spawn.x, lvl8.spawn.y);
+  const world = {
+    level: lvl8, fx: fx8, enemies: [], player: p,
+    shake() {}, hitLag() {}, onHit() {}, onEnemyKilled() {}, respawnPlayer() {},
+  };
+  const idle = { down: new Set(), just: new Set(), held: () => false, pressed: () => false, letGo: () => false, axis: () => 0 };
+  for (let i = 0; i < 20; i++) p.update(DT, idle, world);
+  const H = p.cfg.heavy;
+
+  // ground-slam 的尘土和碎石全部由 stone 参数派生。默认 #4a3f69 和地面图块
+  // #414c6b 几乎同色，实测对比度只有 16 —— 尘土直接融进地面，
+  // 只有靠墙时（背后是亮砖或天空）才看得出轮廓。这就是"只在墙角触发"的真相。
+  const stoneHex = H.stoneColor;
+  ok(typeof stoneHex === "string" && /^#[0-9a-f]{6}$/i.test(stoneHex), "配置了 stoneColor", stoneHex);
+
+  const lumOf = (h) => {
+    const r = parseInt(h.slice(1, 3), 16), g = parseInt(h.slice(3, 5), 16), b = parseInt(h.slice(5, 7), 16);
+    return 0.3 * r + 0.6 * g + 0.1 * b;
+  };
+  const GROUND_LUM = 66;   // 石头地面实测平均亮度
+  const DEFAULT_STONE = "#4a3f69";
+  const contrast = Math.abs(lumOf(stoneHex) - GROUND_LUM);
+  const contrastDefault = Math.abs(lumOf(DEFAULT_STONE) - GROUND_LUM);
+  console.log("  默认石头色亮度差 " + contrastDefault.toFixed(0) + "，现在 " + contrast.toFixed(0));
+  ok(contrast > contrastDefault * 1.8,
+    "石头色和地面的亮度差明显大于默认值（尘土不会融进地面）",
+    contrast.toFixed(0) + " vs " + contrastDefault.toFixed(0));
+  ok(contrast > 25, "亮度差够大（肉眼能分辨）", contrast.toFixed(0));
+
+  // 真实渲染：蓄满爆炸后地面区域要被明显提亮
+  const { Surface } = await import("../core/screen.js");
+  const { hex } = await import("../core/util.js");
+  const baked = lvl8.bake();
+  const cam = { x: 0, y: 128 };
+  const buf = new Surface(320, 180);
+  buf.out = new Uint8ClampedArray(320 * 180 * 4);
+  const lum = (r, g, b) => 0.3 * r + 0.6 * g + 0.1 * b;
+
+  const render = () => {
+    buf.clear(hex("#0b0812"));
+    buf.clearLight();
+    for (let y = 0; y < 180; y++)
+      for (let x = 0; x < 320; x++) {
+        const c = baked.color[(cam.y + y) * baked.w + (cam.x + x)];
+        if (c) buf.px(x, y, c);
+      }
+    world.fx.drawBack(buf, cam);
+    p.draw(buf, cam);
+    world.fx.drawFront(buf, cam);
+  };
+  const groundLum = () => {
+    let s = 0, n = 0;
+    for (let y = 110; y < 175; y++)
+      for (let x = 100; x < 220; x++) {
+        const i = y * 320 + x;
+        const c = buf.color[i], l = buf.light;
+        s += lum(Math.min(255, (c & 255) + l[i * 3]),
+                 Math.min(255, ((c >>> 8) & 255) + l[i * 3 + 1]),
+                 Math.min(255, ((c >>> 16) & 255) + l[i * 3 + 2]));
+        n++;
+      }
+    return s / n;
+  };
+
+  // 基准
+  render();
+  const base = groundLum();
+
+  // 蓄满爆炸
+  p.startCharge(world);
+  const hold = holdHeavy(false);
+  for (let i = 0; i < 60; i++) { if (!p.charging) break; p.update(DT, hold, world); }
+  p.update(DT, holdHeavy(false, true), world);
+  let guard = 0;
+  while (p.slash && p.slash.phase === "windup" && guard++ < 30) p.update(DT, idle, world);
+
+  let peak = 0;
+  for (let f = 0; f < 40; f++) {
+    p.update(DT, idle, world);
+    world.fx.update(DT, cam);
+    render();
+    peak = Math.max(peak, Math.abs(groundLum() - base));
+  }
+  console.log("  地面亮度基准 " + base.toFixed(0) + "，爆炸后最大提亮 " + peak.toFixed(0));
+  ok(peak > 20, "地面被明显提亮（地形变红看得见）", "+" + peak.toFixed(0));
+}
+
 // ---------------------------------------------------------------- 6. 轻点 vs 蓄满
 console.log("\n[6] 轻点和蓄满的差别");
 {

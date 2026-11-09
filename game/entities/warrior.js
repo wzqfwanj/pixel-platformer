@@ -55,6 +55,9 @@ export const CFG = {
     fx: "explosions/dirt-explosion",
     fxFull: "impacts/ground-slam",
     fxFullMin: 0.85,        // 到这个蓄力比例才用 ground-slam
+    // ground-slam 的石头色：默认 #4a3f69 和地面图块 #414c6b 几乎同色，
+    // 实测对比度只有 16，尘土完全看不见。这个是暖金，对比度 35。
+    stoneColor: "#d8a868",
   },
 };
 
@@ -168,7 +171,12 @@ export class Warrior {
     // 蓄满：换成 ground-slam —— 地面闪红开裂、石头喷出弹跳、两道冲击波沿地面推开。
     // 这个特效本身就包含"地形变红 + 碎石飞溅"，不需要另做一套。
     if (full) {
-      world.fx.spawn(H.fxFull, cx, cy, { seed: Math.random() * 100, maxSame: 1 });
+      world.fx.spawn(H.fxFull, cx, cy, {
+        seed: Math.random() * 100,
+        maxSame: 1,
+        // ground-slam 的尘土和碎石都从 stone 派生；默认深紫蓝和地面同色会看不见
+        stone: H.stoneColor,
+      });
     }
     world.shake(H.shake + k * 5);
     world.hitLag(H.hitstop + k * 0.04);
